@@ -712,6 +712,7 @@ async function saveAtend(form){
   if (!val('aDia') || !val('aHora')) return toast('Escolha o dia e a hora.', true);
   const btn = $('#aSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Agendando';
   try {
+    if (data.convite && !hasTok()) await requestTok(); // abre a permissão ainda dentro do toque
     if (data.convite) {
       await loadPeople(parts);
       const emails = [...new Set(parts.filter(u => u !== me.uid).map(u => (people[u]||{}).email).filter(Boolean).concat(extras))];
@@ -1002,10 +1003,9 @@ function showLogin(msg){
 }
 async function doLogin(){
   const b = $('#btnLogin'); b.disabled = true; $('#loginErr').textContent = '';
-  const prov = new firebase.auth.GoogleAuthProvider(); prov.addScope(SCOPE); prov.setCustomParameters({prompt: 'select_account'});
+  const prov = new firebase.auth.GoogleAuthProvider(); prov.setCustomParameters({prompt: 'select_account'});
   try {
-    const r = await auth.signInWithPopup(prov);
-    if (r.credential && r.credential.accessToken) setTok(r.credential.accessToken, 3600);
+    await auth.signInWithPopup(prov);
   } catch(e) {
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') { try { await auth.signInWithRedirect(prov); return; } catch(e2) { e = e2; } }
     const m = {'auth/popup-closed-by-user':'Login cancelado.', 'auth/unauthorized-domain':'Este endereço ainda não está liberado no Firebase.', 'auth/network-request-failed':'Sem internet. Tente de novo.'}[e.code] || ('Não deu para entrar: ' + (e.message || e.code));
@@ -1030,7 +1030,7 @@ async function onUser(u){
 if (!configOk) {
   showLogin('Falta configurar o Firebase (config.js).'); $('#btnLogin').disabled = true;
 } else {
-  auth.getRedirectResult().then(r => { if (r && r.credential && r.credential.accessToken) setTok(r.credential.accessToken, 3600); }).catch(e => showLogin('Não deu para entrar: ' + e.message));
+  auth.getRedirectResult().catch(e => showLogin('Não deu para entrar: ' + e.message));
   auth.onAuthStateChanged(onUser);
 }
 addEventListener('beforeunload', () => { if (pending.size) flush(); });
