@@ -49,8 +49,9 @@ const ic = (n, cls='') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden
 
 /* ================= estado ================= */
 const KEYS = ['clientes','produtos','corretores','peso','treinos','alimentacao','livros','cursos','prefs'];
-const ETAPAS = ['Novo lead','Contato feito','Visita','Simulação','Proposta','Documentação','Venda','Perdido'];
-const ATIVAS = ETAPAS.slice(0, 6);
+const ETAPAS = ['Novo lead','Contato feito','Visita agendada','Visita efetuada','Simulação','Análise de crédito','Proposta','Documentação','Venda','Perdido'];
+const VI = ETAPAS.indexOf('Venda');
+const ATIVAS = ETAPAS.slice(0, VI);
 const TEMPS = ['Quente','Morno','Frio'];
 const PCORES = ['#0A84FF','#30B0C7','#34C759','#FF9500','#AF52DE','#FF2D55','#5E5CE6','#A2845E'];
 // Todos os empreendimentos do repositório de apresentações + os que Franco trabalha fora dele
@@ -123,6 +124,7 @@ async function loadUserData(){
   const d = DEF();
   snaps.forEach((s, i) => { const k = KEYS[i]; S[k] = (s && s.exists && s.data().v !== undefined) ? s.data().v : d[k]; });
   if (!S.corretores.length) S.corretores = d.corretores;
+  let mig = false; S.clientes.forEach(c => { if (c.etapa === 'Visita') { c.etapa = 'Visita agendada'; mig = true; } }); if (mig) save('clientes');
   if (!S.prefs || !S.prefs.catalogo) {           // completa a lista com todos os empreendimentos, uma vez
     const have = new Set(S.produtos.map(p => normNome(p.nome)));
     d.produtos.forEach(p => { const ex = S.produtos.find(x => normNome(x.nome) === normNome(p.nome)); if (ex) { if (!ex.inc) ex.inc = p.inc; if (p.coord) ex.coord = true; } else if (!have.has(normNome(p.nome))) S.produtos.push(p); });
@@ -376,9 +378,9 @@ function viewClientes(){
     const la = a.lembrete || '9999', lb = b.lembrete || '9999';
     return la < lb ? -1 : la > lb ? 1 : a.nome.localeCompare(b.nome);
   });
-  const conv = base.length ? counts[6] / base.length : 0;
+  const conv = base.length ? counts[VI] / base.length : 0;
   const chips = [['todos','Todos'],['quentes','Quentes'], ...S.corretores.map(c => [c.id, c.nome])];
-  return head(`${ativos().length} ativos · ${counts[6]} vendas`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
+  return head(`${ativos().length} ativos · ${counts[VI]} vendas`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
   <div class="chips rv">${chips.map(([k,l]) => `<button class="chip${fc === k ? ' on' : ''}" data-act="fcor" data-v="${k}">${esc(l)}</button>`).join('')}</div>
   <div class="rv"><label class="sr" for="fProd">Produto</label><select class="inp" id="fProd" data-change="fprod"><option value="todos">Todos os produtos</option>${prodOptions(fp)}</select></div>
   <section class="card rv"><div class="sec-row"><h2>Funil</h2>${fe ? `<button class="link" data-act="fetapa" data-v="">Limpar</button>` : `<span class="small muted">Conversão <b class="num">${fmt(conv*100)}%</b></span>`}</div>
@@ -396,7 +398,7 @@ function clienteCard(c){
       <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}</div></div>
       <span class="when ${w.cls}">${esc(w.txt)}</span></div>
     <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${c.temp}">●</span>${c.temp}</span></div>
-    ${idx >= 0 && idx < 7 ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / 7}" data-k="cb${c.id}"></i></div>` : ''}
+    ${idx >= 0 && idx <= VI ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / (VI + 1)}" data-k="cb${c.id}"></i></div>` : ''}
   </button>`;
 }
 
@@ -640,7 +642,7 @@ function sheetCliente(c){
   const fone = (c.fone || '').replace(/\D/g, ''), wa = fone ? 'https://wa.me/' + (fone.length <= 11 ? '55' + fone : fone) : '';
   openSheet(novo ? 'Novo cliente' : c.nome, `<form class="form" data-form="cliente" data-id="${c.id || ''}">
     ${!novo ? `<div class="btnrow">${wa ? `<a class="btn sec" href="${wa}" target="_blank" rel="noopener">${ic('chat','s')}WhatsApp</a>` : ''}<button type="button" class="btn pri" data-act="contato" data-id="${c.id}">${ic('check','s')}Retorno feito</button></div>
-      ${idx >= 0 && idx < 6 ? `<button type="button" class="btn sec wide" data-act="avancar" data-id="${c.id}">Avançar para ${ETAPAS[idx + 1]} ${ic('chev','s')}</button>` : ''}` : ''}
+      ${idx >= 0 && idx < VI ? `<button type="button" class="btn sec wide" data-act="avancar" data-id="${c.id}">Avançar para ${ETAPAS[idx + 1]} ${ic('chev','s')}</button>` : ''}` : ''}
     <div class="field"><label for="cNome">Nome</label><input class="inp" id="cNome" value="${esc(c.nome)}" required ${novo ? 'autofocus' : ''} autocomplete="off"></div>
     <div class="field"><label for="cFone">Telefone / WhatsApp</label><input class="inp" id="cFone" type="tel" inputmode="tel" value="${esc(c.fone)}" placeholder="11 9 9999-9999"></div>
     <div class="f2"><div class="field"><label for="cProd">Produto</label><select class="inp" id="cProd">${prodOptions(c.produtoId)}<option value=""${!c.produtoId ? ' selected' : ''}>Outro / sem produto</option></select></div>
@@ -867,7 +869,7 @@ const ACT = {
     toast(`Retorno de ${c.nome} registrado`);
   },
   avancar: el => {
-    const c = find(S.clientes, el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= 6) return;
+    const c = find(S.clientes, el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= VI) return;
     (c.historico = c.historico || []).push({de: c.etapa, para: ETAPAS[i+1], em: new Date().toISOString()});
     c.etapa = ETAPAS[i+1]; save('clientes'); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
   },
