@@ -126,7 +126,7 @@ async function flush(){
   try {
     const batch = fdb.batch();
     ks.forEach(k => batch.set(fdb.doc(`users/${me.uid}/dados/${k}`), {v: S[k], at: Date.now()}));
-    await batch.commit(); setSync('ok');
+    await batch.commit(); setSync('ok'); agendarFila();
   } catch(e) { ks.forEach(k => pending.add(k)); setSync('err'); setTimeout(flush, 5000); }
 }
 
@@ -150,7 +150,7 @@ function watchAtendimentos(){
   if (unsubAt) unsubAt();
   unsubAt = fdb.collection('atendimentos').where('participantes', 'array-contains', me.uid)
     .onSnapshot(qs => {
-      atend = qs.docs.map(d => ({id: d.id, ...d.data()}));
+      atend = qs.docs.map(d => ({id: d.id, ...d.data()})); agendarFila();
       const ids = new Set(); atend.forEach(a => (a.participantes||[]).forEach(u => ids.add(u)));
       loadPeople([...ids]).then(() => { if (!$('#sheetWrap').classList.contains('open') || ui.tab !== 'agenda') render(false); else render(false); });
     }, () => {});
@@ -201,6 +201,75 @@ async function loadGoogleDay(day){
 }
 const endOf = (ini, min) => localDT(new Date(parseDT(ini).getTime() + min * 60000));
 const evTime = (dt) => ({dateTime: dt + ':00', timeZone: TZ});
+
+/* ================= notificações do Foco (web push) ================= */
+const RESUMO_HORA = '08:30';
+const ehIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const instalado = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSuportado = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+let swReg = null;
+async function registrarSW(){ if (!('serviceWorker' in navigator)) return null; try { swReg = await navigator.serviceWorker.register('sw.js'); return swReg; } catch(e) { return null; } }
+const b64u = s => { const p = '='.repeat((4 - s.length % 4) % 4); const b = atob((s + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...b].map(c => c.charCodeAt(0))); };
+async function pushEstado(){
+  if (!pushSuportado()) return ehIOS && !instalado() ? 'instalar' : 'sem-suporte';
+  if (Notification.permission === 'denied') return 'negado';
+  const reg = swReg || await registrarSW(); if (!reg) return 'sem-suporte';
+  const sub = await reg.pushManager.getSubscription();
+  return sub && Notification.permission === 'granted' ? 'ativo' : 'inativo';
+}
+async function ativarPush(){
+  if (!pushSuportado()) throw new Error(ehIOS && !instalado() ? 'Instale o Foco na tela de início primeiro.' : 'Este navegador não aceita notificações.');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Permissão de notificação negada.');
+  const reg = swReg || await registrarSW(); if (!reg) throw new Error('Não deu para preparar as notificações.');
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: b64u(CFG.vapidPublicKey)});
+  const j = sub.toJSON(), id = (await crypto.subtle.digest('SHA-256', new TextEncoder().encode(j.endpoint))).slice(0, 12);
+  const sid = [...new Uint8Array(id)].map(b => b.toString(16).padStart(2, '0')).join('');
+  await fdb.doc(`users/${me.uid}/dados/push_subs`).set({[sid]: {endpoint: j.endpoint, keys: j.keys, ua: navigator.userAgent.slice(0, 120), em: Date.now()}}, {merge: true});
+  try { localStorage.setItem('foco-push-sid', sid); } catch(e) {}
+  await atualizarFilaPush(true);
+}
+async function desativarPush(){
+  const reg = swReg || await registrarSW(); const sub = reg && await reg.pushManager.getSubscription();
+  let sid = null; try { sid = localStorage.getItem('foco-push-sid'); } catch(e) {}
+  if (sub) await sub.unsubscribe();
+  if (sid) await fdb.doc(`users/${me.uid}/dados/push_subs`).update({[sid]: firebase.firestore.FieldValue.delete()}).catch(() => {});
+}
+function montarFila(){
+  const out = [], ag = Date.now(), lim = ag + 8 * 864e5, a = antec(), prefs = S.prefs || {};
+  const add = (id, quando, title, body, url) => { const t = quando.getTime(); if (t > ag - 10 * 60e3 && t < lim) out.push({id, quando: t, title, body, url}); };
+  const antes = (dt, m) => new Date(parseDT(dt).getTime() - m * 60e3);
+  if (prefs.pushRetornos !== false) ativos().filter(c => c.lembrete && c.lembrete.slice(11, 16) !== '23:59').forEach(c => add('r' + c.id + c.lembrete, antes(c.lembrete, a), 'Retorno: ' + c.nome, [P(c.produtoId).nome, c.etapa, c.fone].filter(Boolean).join(' · '), './#clientes'));
+  if (prefs.pushVisitas !== false) atend.filter(x => x.status === 'ativo' && x.inicio).forEach(x => add('a' + x.id + x.inicio, antes(x.inicio, Math.max(a, 30)), x.titulo + (x.cliente ? ' · ' + x.cliente : ''), `Às ${x.inicio.slice(11, 16)}${x.local ? ' · ' + x.local : ''}`, './#agenda'));
+  if (prefs.pushTarefas !== false) (S.tarefas || []).filter(x => x.hora && !x.feitaEm).forEach(x => add('t' + x.id + x.data + x.hora, antes(x.data + 'T' + x.hora, a), (x.tipo === 'compromisso' ? '' : 'Tarefa: ') + x.titulo, `Às ${x.hora}${x.local ? ' · ' + x.local : ''}`, './#agenda'));
+  if (prefs.pushResumo !== false) for (let i = 0; i < 8; i++) {
+    const dia = addDays(today(), i), ret = ativos().filter(c => c.lembrete && c.lembrete.slice(0, 10) === dia).length + (i === 0 ? ativos().filter(c => c.lembrete && c.lembrete.slice(0, 10) < dia).length : 0);
+    const vis = atend.filter(x => x.status === 'ativo' && x.inicio && x.inicio.slice(0, 10) === dia).length, tar = (S.tarefas || []).filter(x => x.data === dia && !x.feitaEm).length;
+    const partes = [ret && `${ret} ${ret === 1 ? 'retorno' : 'retornos'}`, vis && `${vis} ${vis === 1 ? 'visita' : 'visitas'}`, tar && `${tar} ${tar === 1 ? 'item na agenda' : 'itens na agenda'}`].filter(Boolean);
+    if (partes.length) add('d' + dia, parseDT(dia + 'T' + RESUMO_HORA), 'Seu dia no Foco', 'Hoje: ' + partes.join(', ') + '.', './');
+  }
+  return out.sort((x, y) => x.quando - y.quando).slice(0, 200);
+}
+let filaTimer = null, filaSig = '';
+async function atualizarFilaPush(forcar){
+  if (!me || !fdb) return;
+  let sid = null; try { sid = localStorage.getItem('foco-push-sid'); } catch(e) {}
+  if (!sid && !forcar) return;
+  const fila = montarFila(), sig = JSON.stringify(fila);
+  if (sig === filaSig && !forcar) return; filaSig = sig;
+  try { await fdb.doc(`users/${me.uid}/dados/push_fila`).set({itens: fila, tz: TZ, em: Date.now()}); } catch(e) {}
+}
+const agendarFila = () => { clearTimeout(filaTimer); filaTimer = setTimeout(() => atualizarFilaPush(false), 1500); };
+async function blocoPush(){
+  const box = $('#pushBox'); if (!box) return;
+  const st = await pushEstado(), prefs = S.prefs || {};
+  const tipos = [['pushResumo', `Resumo do dia às ${RESUMO_HORA}`], ['pushRetornos', 'Retornos de clientes com horário'], ['pushVisitas', 'Visitas e atendimentos'], ['pushTarefas', 'Compromissos e tarefas com horário']];
+  box.innerHTML = `<div class="sec-row" style="align-items:flex-start;gap:12px"><div><b style="font-weight:500">Notificações do Foco</b><div class="small muted">${({ativo:'Ativas neste aparelho', inativo:'Avisos com o ícone do Foco, mesmo com o app fechado', negado:'Bloqueadas nos ajustes do celular. Libere em Ajustes → Notificações → Foco.', instalar:'No iPhone, primeiro adicione o Foco à tela de início pelo Safari (Compartilhar → Adicionar à Tela de Início) e abra por lá.', 'sem-suporte':'Este navegador não aceita notificações.'})[st]}</div></div>
+    ${st === 'ativo' ? '<button type="button" class="mini" data-act="pushOff">Desativar</button>' : st === 'inativo' ? '<button type="button" class="mini" data-act="pushOn">Ativar</button>' : ''}</div>
+    ${st === 'ativo' ? `<div class="list" style="margin-top:6px">${tipos.map(([k, l]) => `<div class="switch"><span class="small">${l}</span><button type="button" class="sw${prefs[k] !== false ? ' on' : ''}" data-act="pushTipo" data-v="${k}" role="switch" aria-checked="${prefs[k] !== false}"></button></div>`).join('')}</div>
+      <button type="button" class="link small" data-act="pushTeste" style="justify-self:start;margin-top:4px">Enviar um aviso de teste</button>` : ''}`;
+}
 
 /* ================= animação ================= */
 const mem = new Map();
@@ -795,6 +864,7 @@ function estCursos(){
 
 /* ================= AJUSTES (sheet) ================= */
 function sheetAjustes(){
+  setTimeout(blocoPush, 0);
   const th = (()=>{ try { return localStorage.getItem('foco-theme') || 'auto'; } catch(e) { return 'auto'; } })();
   openSheet('Ajustes', `<div class="form">
     <div class="card" style="display:flex;gap:12px;align-items:center;box-shadow:none;background:var(--surface)"><span class="avatar" style="width:48px;height:48px">${me.photoURL ? `<img src="${esc(me.photoURL)}" alt="" referrerpolicy="no-referrer">` : initials(me.displayName)}</span>
@@ -803,7 +873,7 @@ function sheetAjustes(){
     <div class="card" style="box-shadow:none;display:grid;gap:12px" id="cardNotif"><b>Notificações</b>
       <div class="switch"><div><b style="font-weight:500">Lembretes pela Google Agenda</b><div class="small muted">Retornos, visitas, compromissos e tarefas com horário entram na agenda já com aviso</div></div><button type="button" class="sw${lembreteAuto() ? ' on' : ''}" data-act="lembreteAuto" role="switch" aria-checked="${lembreteAuto()}"></button></div>
       <div class="field"><label>Avisar com antecedência de</label>${seg('antec', [['0','Na hora'],['15','15 min'],['30','30 min'],['60','1 h']], String(antec()))}</div>
-      <div id="pushBox"></div>
+      <div id="pushBox"><span class="small muted">Verificando notificações…</span></div>
     </div>
     <div class="field"><label>Frases do dia falam com você no</label>${seg('genero', [['m','Masculino'],['f','Feminino']], generoAtual() || '')}</div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><div><b>Google Agenda</b><div class="small muted">${hasTok() ? 'Conectada nesta sessão' : 'Desconectada'}</div></div>${hasTok() ? '<span class="pill ok">Ativa</span>' : '<button class="mini" data-act="conectarAgenda">Conectar</button>'}</div></div>
@@ -1387,6 +1457,14 @@ const ACT = {
   },
   delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
+  pushOn: async el => { el.disabled = true; el.innerHTML = '<span class="spin" style="width:14px;height:14px"></span>'; try { await ativarPush(); toast('Notificações ativadas'); } catch(e) { toast(e.message, true); } blocoPush(); },
+  pushOff: async () => { try { await desativarPush(); toast('Notificações desativadas neste aparelho'); } catch(e) { toast('Não deu para desativar: ' + e.message, true); } blocoPush(); },
+  pushTipo: el => { const k = el.dataset.v, on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-checked', on); S.prefs = Object.assign({}, S.prefs, {[k]: on}); save('prefs'); },
+  pushTeste: async () => {
+    const quando = Date.now() + 60e3;
+    try { await fdb.doc(`users/${me.uid}/dados/push_teste`).set({itens: [{id: 'teste' + quando, quando, title: 'Teste do Foco', body: 'As notificações estão funcionando.', url: './'}], em: Date.now()}); toast('Teste agendado. Deve chegar em até 15 minutos, mesmo com o app fechado.'); }
+    catch(e) { toast('Não deu para agendar o teste: ' + e.message, true); }
+  },
   lembreteAuto: el => { const on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-checked', on); S.prefs = Object.assign({}, S.prefs, {lembreteAuto: on}); save('prefs'); toast(on ? 'Lembretes na Google Agenda ligados' : 'Lembretes na Google Agenda desligados'); },
   antec: el => { S.prefs = Object.assign({}, S.prefs, {antec: +el.dataset.v}); save('prefs'); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); toast(+el.dataset.v ? `Aviso ${el.textContent} antes` : 'Aviso na hora'); },
   outraFrase: () => {
@@ -1566,6 +1644,7 @@ async function onUser(u){
   try { await loadUserData(); } catch(e) { toast('Não deu para carregar seus dados. Verifique a conexão.', true); }
   watchAtendimentos();
   render(true); placePill();
+  registrarSW().then(() => atualizarFilaPush(false));
 }
 
 if (!configOk) {
