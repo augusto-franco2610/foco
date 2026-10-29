@@ -473,11 +473,11 @@ function viewHoje(){
     <button class="card tap kpi rv" data-act="goestudos" data-v="leitura"><span class="lbl">Livros em ${now.getFullYear()}</span><span class="val num"><span data-count="${lidosAno()}" data-k="kl">0</span><small>de ${S.livros.meta || 0}</small></span>${hbar(S.livros.meta ? lidosAno() / S.livros.meta : 0, 'klb')}</button>
   </section>
 
+  ${cardCursos()}
   <section class="card rv"><h2>Para hoje · ${pend.length}</h2>
     ${pend.length ? `<div class="list">${pend.map(taskRow).join('')}</div>` : empty('check', 'Tudo feito por hoje', 'Os retornos de clientes e as rotinas do dia aparecem aqui.')}
   </section>
   ${feitas.length ? `<section class="card rv"><h2>Feitas · ${feitas.length}</h2><div class="list">${feitas.map(taskRow).join('')}</div></section>` : ''}
-  ${cardCursos()}
   ${cardVGV()}
   ${cardPorCorretor()}
   ${porProd.length ? `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por produto</h2></div><div class="funnel">${porProd.map((x, j) => `<button class="fstage" data-act="goprod" data-v="${x.p.id}" style="--j:${j}"><span class="nm">${esc(x.p.nome)}</span><span class="tr"><i style="background:${x.p.cor};transform:scaleX(0)" data-bar="${x.n / maxP}" data-k="pp${x.p.id}"></i></span><span class="ct num">${x.n}</span></button>`).join('')}</div></section>` : ''}
