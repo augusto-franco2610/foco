@@ -307,3 +307,12 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .frase-txt cite::before{content:"— "}
 .frase-gen{display:grid;gap:8px;padding-top:10px;border-top:1px solid var(--line)}
 .link{color:var(--accent);font-weight:500}
+
+/* clientes por corretor: barra empilhada por temperatura */
+.fstage .stk{display:flex;height:100%;width:100%;border-radius:7px;overflow:hidden;transform-origin:left;transition:transform .9s var(--ease);transition-delay:calc(var(--j,0)*60ms)}
+.fstage .stk i{display:block;height:100%;transform:none;border-radius:0}
+.tq{background:var(--err)} .tm{background:var(--warn)} .tf{background:var(--accent)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.fstage .stk i.tq{background:var(--err)} .fstage .stk i.tm{background:var(--warn)} .fstage .stk i.tf{background:var(--accent)}

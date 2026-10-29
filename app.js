@@ -517,8 +517,24 @@ function viewHoje(){
     ${pend.length ? `<div class="list">${pend.map(taskRow).join('')}</div>` : empty('check', 'Tudo feito por hoje', 'Os retornos de clientes e as rotinas do dia aparecem aqui.')}
   </section>
   ${feitas.length ? `<section class="card rv"><h2>Feitas · ${feitas.length}</h2><div class="list">${feitas.map(taskRow).join('')}</div></section>` : ''}
+  ${cardPorCorretor()}
   ${porProd.length ? `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por produto</h2></div><div class="funnel">${porProd.map((x, j) => `<button class="fstage" data-act="goprod" data-v="${x.p.id}" style="--j:${j}"><span class="nm">${esc(x.p.nome)}</span><span class="tr"><i style="background:${x.p.cor};transform:scaleX(0)" data-bar="${x.n / maxP}" data-k="pp${x.p.id}"></i></span><span class="ct num">${x.n}</span></button>`).join('')}</div></section>` : ''}
   `;
+}
+
+function cardPorCorretor(){
+  const at = ativos(); if (!at.length) return '';
+  const rows = S.corretores.map(b => { const cs = at.filter(c => c.corretorId === b.id); return {b, n: cs.length, q: cs.filter(c => c.temp === 'Quente').length, m: cs.filter(c => c.temp === 'Morno').length, f: cs.filter(c => c.temp === 'Frio').length,
+    atr: cs.filter(c => c.lembrete && c.lembrete.slice(0,10) < today()).length}; }).filter(r => r.n).sort((a, b) => b.n - a.n);
+  const max = Math.max(1, ...rows.map(r => r.n));
+  const seg = (v, n, cls) => v ? `<i class="${cls}" style="flex:${v}"></i>` : '';
+  return `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por corretor</h2><span class="small muted num">${at.length} no total</span></div>
+    <div class="funnel">${rows.map((r, j) => `<button class="fstage cor" data-act="goclientes" data-v="${r.b.id}" style="--j:${j}" aria-label="${esc(r.b.nome)}: ${r.n} clientes">
+      <span class="nm">${esc(r.b.nome)}${r.atr ? ` <span class="down small" title="atrasados">· ${r.atr}</span>` : ''}</span>
+      <span class="tr"><span class="stk" style="transform:scaleX(0)" data-bar="${r.n / max}" data-k="bc${r.b.id}">${seg(r.q, r.n, 'tq')}${seg(r.m, r.n, 'tm')}${seg(r.f, r.n, 'tf')}</span></span>
+      <span class="ct num">${r.n}</span></button>`).join('')}</div>
+    <div class="legend small muted"><span><i class="tq"></i>Quente</span><span><i class="tm"></i>Morno</span><span><i class="tf"></i>Frio</span><span class="down">· atrasados</span></div>
+  </section>`;
 }
 
 /* ================= CLIENTES ================= */
