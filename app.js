@@ -477,12 +477,33 @@ function viewHoje(){
     ${pend.length ? `<div class="list">${pend.map(taskRow).join('')}</div>` : empty('check', 'Tudo feito por hoje', 'Os retornos de clientes e as rotinas do dia aparecem aqui.')}
   </section>
   ${feitas.length ? `<section class="card rv"><h2>Feitas · ${feitas.length}</h2><div class="list">${feitas.map(taskRow).join('')}</div></section>` : ''}
+  ${cardCursos()}
   ${cardVGV()}
   ${cardPorCorretor()}
   ${porProd.length ? `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por produto</h2></div><div class="funnel">${porProd.map((x, j) => `<button class="fstage" data-act="goprod" data-v="${x.p.id}" style="--j:${j}"><span class="nm">${esc(x.p.nome)}</span><span class="tr"><i style="background:${x.p.cor};transform:scaleX(0)" data-bar="${x.n / maxP}" data-k="pp${x.p.id}"></i></span><span class="ct num">${x.n}</span></button>`).join('')}</div></section>` : ''}
   `;
 }
 
+function cardCursos(){
+  const itens = [...S.cursos.items].sort((a, b) => (!cursoProx(a)) - (!cursoProx(b)) || (a.prazo || '9999').localeCompare(b.prazo || '9999'));
+  if (!itens.length) return `<section class="card rv"><div class="sec-row"><h2>Cursos</h2></div>${empty('cap', 'Nenhum curso em andamento', 'Cadastre o curso com as etapas e acompanhe o progresso por aqui.', `<button class="btn pri" data-act="novoCurso">${ic('plus','s')}Novo curso</button>`)}</section>`;
+  const t = today(), ativos = itens.filter(c => cursoProx(c)), concl = itens.length - ativos.length;
+  const etapasMes = S.cursos.items.reduce((a, c) => a + (c.etapas || []).filter(e => e.feitaEm && e.feitaEm.slice(0,7) === t.slice(0,7)).length, 0);
+  return `<section class="card rv"><div class="sec-row"><h2>Cursos</h2><button class="link small" data-act="goestudos" data-v="cursos">Ver todos</button></div>
+    <div class="small muted" style="margin:-4px 0 10px"><span class="num">${ativos.length}</span> em andamento · <span class="num">${concl}</span> ${concl === 1 ? 'concluído' : 'concluídos'} · <span class="num">${etapasMes}</span> ${etapasMes === 1 ? 'etapa' : 'etapas'} neste mês</div>
+    <div class="list">${ativos.slice(0, 4).map(c => {
+      const tot = c.etapas.length, fe = c.etapas.filter(e => e.feitaEm).length, pc = tot ? fe / tot : 0, nx = cursoProx(c), ni = c.etapas.indexOf(nx);
+      const dias = c.prazo ? Math.round((parseD(c.prazo) - parseD(t)) / 864e5) : null;
+      const falta = tot - fe, ritmo = dias != null && dias > 0 ? falta / Math.max(1, Math.ceil(dias / 7)) : null;
+      return `<div class="row" data-flip="hc${c.id}">${ring(pc, 50, 6, 'hc' + c.id, 'var(--accent)', `<b class="num" style="font-size:12px">${fmt(pc*100)}%</b>`)}
+        <button class="grow rowbtn" data-act="abrirCursoHoje" data-id="${c.id}" style="display:block;min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span>
+          <span class="s" style="display:block">Próxima: ${esc(nx.nome)}</span>
+          <span class="s num" style="display:block">${falta} ${falta === 1 ? 'etapa restante' : 'etapas restantes'}${dias == null ? '' : dias < 0 ? ` · <span class="down">prazo passou ${ddmm(c.prazo)}</span>` : dias === 0 ? ' · <span class="down">prazo hoje</span>' : ` · ${dias} ${dias === 1 ? 'dia' : 'dias'} até ${ddmm(c.prazo)}`}</span></button>
+        <button class="check" data-act="etapa" data-id="${c.id}" data-v="${ni}" aria-label="Concluir ${esc(nx.nome)}"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button></div>`; }).join('')}
+      ${!ativos.length ? '<p class="small up" style="margin:0;font-weight:600">Todos os cursos concluídos. Hora de escolher o próximo.</p>' : ''}</div>
+    ${ativos.length > 4 ? `<button class="link small" data-act="goestudos" data-v="cursos" style="margin-top:8px">+${ativos.length - 4} cursos</button>` : ''}
+  </section>`;
+}
 /* ---------- VGV ---------- */
 const parseBRL = t => { const v = String(t||'').replace(/[^\d,.-]/g,''); if (!v) return 0; const n = v.includes(',') ? v.replace(/\./g,'').replace(',', '.') : (/\.\d{3}($|\.)/.test(v) ? v.replace(/\./g,'') : v); return Math.max(0, parseFloat(n) || 0); };
 const brl = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0});
@@ -1221,7 +1242,8 @@ const ACT = {
     openSheet('Páginas lidas', `<form class="form" data-form="pag" data-id="${l.id}"><div class="field"><label for="pgN">Quantas páginas você leu hoje?</label><input class="inp num" id="pgN" type="number" inputmode="numeric" min="1" required autofocus></div><div class="field"><label for="pgA">Ou: estou na página</label><input class="inp num" id="pgA" type="number" inputmode="numeric" min="0" max="${l.paginas}" placeholder="${l.lidas}"></div><button class="btn pri wide">Registrar</button></form>`);
     $('#pgA').addEventListener('input', () => { $('#pgN').required = !val('pgA'); });
   },
-  novoCurso: () => sheetCurso(null), editCurso: el => sheetCurso(find(S.cursos.items, el.dataset.id)),
+  novoCurso: () => sheetCurso(null),
+  abrirCursoHoje: el => { ui.estudos = 'cursos'; ui.cursoAberto = el.dataset.id; switchTab('estudos'); }, editCurso: el => sheetCurso(find(S.cursos.items, el.dataset.id)),
   delCurso: el => { S.cursos.items = S.cursos.items.filter(r => r.id !== el.dataset.id); save('cursos'); closeSheet(); render(false); toast('Curso excluído'); },
   toggleCurso: el => { ui.cursoAberto = ui.cursoAberto === el.dataset.id ? null : el.dataset.id; render(false); const s = document.querySelector('.steps'); if (s && !RM.matches) s.animate([{opacity:0, transform:'translateY(-6px)'}, {opacity:1, transform:'none'}], {duration: 360, easing: 'cubic-bezier(.22,.8,.24,1)'}); },
   etapa: el => {
