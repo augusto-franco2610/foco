@@ -621,7 +621,7 @@ function viewAgenda(){
   const row = it => {
     if (it.tipo === 'a') { const a = it.a, fim = endOf(a.inicio, a.duracao || 60);
       return `<button class="evt rowbtn" style="display:grid" data-act="abrirAtend" data-id="${a.id}" data-flip="a${a.id}"><div class="tm num">${it.hora}<small>${fim.slice(11,16)}</small></div>
-        <div class="bd"><div class="t" style="font-weight:600">${esc(a.titulo)}${a.cliente ? ' · ' + esc(a.cliente) : ''}</div>
+        <div class="bd"><div class="t" style="font-weight:600">${esc(a.titulo)}${a.cliente ? ' · ' + esc(a.cliente) : ''}${a.status === 'realizado' ? ' <span class="pill ok">efetuada</span>' : ''}</div>
         <div class="s small muted">${[a.produto, a.local].filter(Boolean).map(esc).join(' · ')}</div>
         <div class="faces">${(a.participantes||[]).map(u => face(u)).join('')}</div></div></button>`; }
     if (it.tipo === 'r') { const c = it.c;
@@ -854,11 +854,38 @@ function sheetCliente(c){
     <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
     <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div><button type="button" class="sw${c.calEventId ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${!!c.calEventId}"></button></div>
+    ${blocoVisita(c, novo)}
     <div class="field"><label for="cNotas">Anotações</label><textarea class="inp" id="cNotas" placeholder="Renda, FGTS, preferência de planta, objeções…">${esc(c.notas)}</textarea></div>
     <button class="btn pri wide" id="cSave">${novo ? 'Salvar cliente' : 'Salvar alterações'}</button>
     ${!novo && (c.contatos||[]).length ? `<div class="card" style="box-shadow:none"><h2>Retornos registrados</h2><div class="list">${[...c.contatos].reverse().slice(0, 8).map(x => `<div class="row small"><span class="grow">${parseDT(x).toLocaleString('pt-BR', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'})}</span></div>`).join('')}</div></div>` : ''}
     ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">${ic('trash','s')}Excluir cliente</button>${confirmBox('Excluir ' + esc(c.nome) + '? Isso não pode ser desfeito.', 'delCliente', c.id)}` : ''}
   </form>`);
+}
+const TIPOS_VISITA = ['Visita ao decorado','Visita ao imóvel','Visita ao stand','Visita à obra'];
+const visitasDe = c => c && c.id ? atend.filter(a => a.clienteId === c.id && a.status !== 'cancelado').sort(byKey('inicio')) : [];
+function blocoVisita(c, novo){
+  const vs = visitasDe(c), now = localDT(new Date());
+  const prox = vs.filter(a => a.status !== 'realizado');
+  const feitas = vs.filter(a => a.status === 'realizado');
+  const t = today(), am = addDays(t, 1), p = P(c.produtoId);
+  return `<div class="card" style="box-shadow:none;display:grid;gap:12px">
+    <div class="sec-row"><b>Visita</b>${feitas.length ? `<span class="pill ok">${feitas.length} ${feitas.length === 1 ? 'efetuada' : 'efetuadas'}</span>` : ''}</div>
+    ${prox.map(a => `<div class="row" style="padding:0;border:0">${ic('agenda','s')}<div class="grow"><div class="t" style="font-weight:600">${esc(a.titulo)}</div><div class="s">${parseD(a.inicio).toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'})}, ${a.inicio.slice(11,16)}${a.local ? ' · ' + esc(a.local) : ''}${a.inicio < now ? ' · <span class="down">já passou</span>' : ''}</div></div>
+      <button type="button" class="mini" data-act="visitaFeita" data-id="${a.id}" data-c="${c.id}">Efetuada</button></div>`).join('')}
+    <div id="vForm" ${prox.length || novo ? '' : ''}hidden>
+      <div class="form">
+        <div class="field"><label for="vTipo">Tipo</label><select class="inp" id="vTipo">${TIPOS_VISITA.map(x => opt(x, x, 'Visita ao decorado')).join('')}</select></div>
+        <div class="field"><label for="vDia">Dia</label><input class="inp" id="vDia" type="date" value="${am}" min="${t}"></div>
+        <div class="f2"><div class="field"><label for="vHora">Hora</label><input class="inp" id="vHora" type="time" value="10:00"></div>
+          <div class="field"><label for="vDur">Duração</label><select class="inp" id="vDur">${[[30,'30 min'],[60,'1 h'],[90,'1h30'],[120,'2 h']].map(([v,l]) => opt(String(v), l, '60')).join('')}</select></div></div>
+        <div class="field"><label for="vLocal">Local</label><input class="inp" id="vLocal" value="${c.produtoId && p.nome !== 'Sem produto' ? esc('Stand ' + p.nome) : ''}" placeholder="Stand, decorado, endereço…"></div>
+        <div class="field"><label>Com parceiros (opcional)</label><div class="chips" id="vPeople" style="flex-wrap:wrap"><span class="small muted">Carregando…</span></div></div>
+        <div class="switch"><div><b>Google Agenda e convites</b><div class="small muted">Cria o evento e convida os parceiros</div></div><button type="button" class="sw on" id="vCal" data-act="sw" role="switch" aria-checked="true"></button></div>
+        <p class="small muted" style="margin:0">A visita é agendada ao salvar o cliente e a etapa passa para "Visita agendada".</p>
+      </div>
+    </div>
+    <button type="button" class="btn sec wide" data-act="visitaToggle" id="vBtn">${ic('plus','s')}${prox.length ? 'Agendar outra visita' : 'Agendar visita'}</button>
+  </div>`;
 }
 async function saveCliente(form){
   const id = form.dataset.id, novo = !id;
@@ -872,9 +899,24 @@ async function saveCliente(form){
   if (etapaAnt && etapaAnt !== c.etapa) (c.historico = c.historico || []).push({de: etapaAnt, para: c.etapa, em: new Date().toISOString()});
   if (novo) S.clientes.push(c);
   const wantCal = $('#cCal').classList.contains('on');
+  const vf = $('#vForm'), querVisita = vf && !vf.hidden;
+  let visita = null;
+  if (querVisita) {
+    if (!val('vDia') || !val('vHora')) return toast('Escolha o dia e a hora da visita.', true);
+    const parts = [me.uid, ...[...document.querySelectorAll('#vPeople .chip.on')].map(b => b.dataset.v)];
+    visita = {titulo: val('vTipo'), cliente: c.nome, clienteId: c.id, produto: P(c.produtoId).nome !== 'Sem produto' ? P(c.produtoId).nome : '', inicio: val('vDia') + 'T' + val('vHora'), duracao: +val('vDur') || 60,
+      local: val('vLocal'), notas: [c.fone && 'Telefone do cliente: ' + c.fone, c.notas].filter(Boolean).join('\n'), participantes: [...new Set(parts)], emailsExtras: '', convite: $('#vCal').classList.contains('on'), criadoPor: me.uid, status: 'ativo', atualizado: Date.now()};
+    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita agendada')) { (c.historico = c.historico || []).push({de: c.etapa, para: 'Visita agendada', em: new Date().toISOString()}); c.etapa = 'Visita agendada'; }
+  }
   const btn = $('#cSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Salvando';
+  if ((wantCal || (visita && visita.convite)) && !hasTok()) { try { await requestTok(); } catch(e) {} }
   try { await syncClienteCal(c, wantCal); } catch(e) { toast('Cliente salvo, mas a agenda falhou: ' + e.message, true); }
-  save('clientes'); closeSheet(); render(false); toast(novo ? 'Cliente adicionado' : 'Cliente atualizado');
+  save('clientes');
+  if (visita) {
+    try { await gravarAtend(visita, null, []); delete gcache[visita.inicio.slice(0,10)]; closeSheet(); render(false); toast(`Visita de ${c.nome} agendada para ${ddmm(visita.inicio)} às ${visita.inicio.slice(11,16)}`); return; }
+    catch(e) { closeSheet(); render(false); toast('Cliente salvo, mas a visita não foi agendada: ' + e.message, true); return; }
+  }
+  closeSheet(); render(false); toast(novo ? 'Cliente adicionado' : 'Cliente atualizado');
 }
 async function syncClienteCal(c, want){
   if (want && c.lembrete && ATIVAS.includes(c.etapa)) {
@@ -941,6 +983,16 @@ async function saveAtend(form){
   const btn = $('#aSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Agendando';
   try {
     if (data.convite && !hasTok()) await requestTok(); // abre a permissão ainda dentro do toque
+    await gravarAtend(data, old, extras);
+    ui.agendaDia = data.inicio.slice(0,10); delete gcache[ui.agendaDia];
+    closeSheet(); toast(novo ? (data.convite ? 'Atendimento agendado e convites enviados' : 'Atendimento agendado') : 'Atendimento atualizado');
+    if (ui.tab !== 'agenda') { switchTab('agenda'); } else render(false);
+  } catch(e) { btn.disabled = false; btn.textContent = novo ? 'Agendar' : 'Salvar alterações'; toast('Não deu para agendar: ' + e.message, true); }
+}
+// grava no Google Agenda (com convites) e no Firestore; usado pela agenda e pelo cadastro do cliente
+async function gravarAtend(data, old, extras){
+  const parts = data.participantes;
+  {
     if (data.convite) {
       await loadPeople(parts);
       const emails = [...new Set(parts.filter(u => u !== me.uid).map(u => (people[u]||{}).email).filter(Boolean).concat(extras))];
@@ -955,12 +1007,9 @@ async function saveAtend(form){
       try { await cal(`calendars/primary/events/${old.eventId}?sendUpdates=all`, {method: 'DELETE'}); } catch(e) {}
       Object.assign(data, {eventId: null, iCalUID: null, htmlLink: null});
     }
-    if (novo) { data.criado = Date.now(); await fdb.collection('atendimentos').add(data); }
-    else await fdb.doc('atendimentos/' + id).update(data);
-    ui.agendaDia = data.inicio.slice(0,10); delete gcache[ui.agendaDia];
-    closeSheet(); toast(novo ? (data.convite ? 'Atendimento agendado e convites enviados' : 'Atendimento agendado') : 'Atendimento atualizado');
-    if (ui.tab !== 'agenda') { switchTab('agenda'); } else render(false);
-  } catch(e) { btn.disabled = false; btn.textContent = novo ? 'Agendar' : 'Salvar alterações'; toast('Não deu para agendar: ' + e.message, true); }
+    if (!old) { data.criado = Date.now(); await fdb.collection('atendimentos').add(data); }
+    else await fdb.doc('atendimentos/' + old.id).update(data);
+  }
 }
 
 function sheetRotina(r){
@@ -1131,6 +1180,19 @@ const ACT = {
     c.etapa = ETAPAS[i+1]; marcarVenda(c); save('clientes'); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
   },
   novoCliente: () => sheetCliente(null),
+  visitaToggle: async () => {
+    const f = $('#vForm'), b = $('#vBtn'); f.hidden = !f.hidden;
+    b.innerHTML = f.hidden ? ic('plus','s') + 'Agendar visita' : ic('x','s') + 'Não agendar agora';
+    if (!f.hidden) { if (!RM.matches) f.animate([{opacity:0, transform:'translateY(-6px)'}, {opacity:1, transform:'none'}], {duration: 300}); await loadDirectory(); const box = $('#vPeople'); if (!box) return;
+      const others = Object.entries(people).filter(([u]) => u !== me.uid);
+      box.innerHTML = others.length ? others.map(([u, p]) => `<button type="button" class="chip" data-act="pickPerson" data-v="${u}">${esc(p.nome || p.email)}</button>`).join('') : '<span class="small muted">Nenhum parceiro entrou no app ainda.</span>'; }
+  },
+  visitaFeita: async el => {
+    const a = find(atend, el.dataset.id), c = find(S.clientes, el.dataset.c); if (!a || !c) return;
+    try { await fdb.doc('atendimentos/' + a.id).update({status: 'realizado', atualizado: Date.now()}); } catch(e) { return toast('Não deu para marcar: ' + e.message, true); }
+    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita efetuada')) { (c.historico = c.historico || []).push({de: c.etapa, para: 'Visita efetuada', em: new Date().toISOString()}); c.etapa = 'Visita efetuada'; save('clientes'); }
+    closeSheet(); render(false); toast(`Visita de ${c.nome} efetuada`);
+  },
   abrirCliente: el => sheetCliente(find(S.clientes, el.dataset.id)),
   fcor: el => { ui.clientesFiltroCor = el.dataset.v; render(false); },
   fprod: el => { ui.clientesFiltroProd = el.dataset.v; render(false); },
@@ -1297,6 +1359,7 @@ document.addEventListener('click', e => {
   e.preventDefault(); fn(el, e);
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'cProd') { const l = $('#vLocal'), p = P(e.target.value); if (l && (!l.value || /^Stand /.test(l.value))) l.value = e.target.value && p.nome !== 'Sem produto' ? 'Stand ' + p.nome : ''; }
   const el = e.target.closest('[data-change]'); if (!el) return;
   if (el.dataset.change === 'fprod') { ui.clientesFiltroProd = el.value; render(false); }
 });

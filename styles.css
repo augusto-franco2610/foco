@@ -240,8 +240,8 @@ textarea.inp{height:auto;min-height:84px;padding:12px 14px;resize:vertical}
 .inp:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
 select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--fg2) 50%),linear-gradient(135deg,var(--fg2) 50%,transparent 50%);background-position:calc(100% - 20px) 50%,calc(100% - 15px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:36px}
 .form{display:grid;gap:14px}
-.f2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.f3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.f2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.f3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .toggles{display:flex;gap:6px;flex-wrap:wrap}
 .toggles button{width:40px;height:40px;border-radius:50%;background:var(--surface2);font-weight:600;transition:background var(--t),color var(--t),transform var(--t-fast)}
 .toggles button.on{background:var(--accent);color:#fff}
@@ -323,3 +323,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .fstage.vg .tr{height:10px;border-radius:5px}
 .fstage.vg .tr i{border-radius:5px}
 .fstage.vg .ct{line-height:1.25;text-align:right;font-weight:600}
+
+.inp{min-width:0;max-width:100%}
+.sheet-b{overflow-x:hidden}
+.field{min-width:0}
