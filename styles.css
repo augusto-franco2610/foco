@@ -311,7 +311,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 /* clientes por corretor: barra empilhada por temperatura */
 .fstage .stk{display:flex;height:100%;width:100%;border-radius:7px;overflow:hidden;transform-origin:left;transition:transform .9s var(--ease);transition-delay:calc(var(--j,0)*60ms)}
 .fstage .stk i{display:block;height:100%;transform:none;border-radius:0}
-.tq{background:var(--err)} .tm{background:var(--warn)} .tf{background:var(--accent)}
+.legend i.tq{background:var(--err)} .legend i.tm{background:var(--warn)} .legend i.tf{background:var(--accent)}
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
@@ -335,3 +335,13 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .livro-info{display:flex;gap:14px;align-items:flex-start;background:var(--surface)}
 .sinopse{margin:4px 0 0;color:var(--fg2);display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
 .livro-res .t{font-weight:500}
+
+/* tarefas e compromissos */
+.evt.tk .bd{border-color:var(--ok)}
+.evt.cp .bd{border-color:#AF52DE}
+.evt.tk.done .t{color:var(--fg2);text-decoration:line-through;text-decoration-color:var(--line)}
+.evt .check{width:24px;height:24px;margin-top:1px}
+.opcao{padding:14px 0}
+.op-ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
+.opcao:nth-child(2) .op-ic{background:rgba(175,82,222,.14);color:#AF52DE}
+.opcao:nth-child(3) .op-ic{background:var(--ok-soft);color:var(--ok)}

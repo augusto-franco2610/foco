@@ -58,7 +58,7 @@ function aplicarTema(v){
 const ic = (n, cls='') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||''}</svg>`;
 
 /* ================= estado ================= */
-const KEYS = ['clientes','produtos','corretores','peso','treinos','alimentacao','livros','cursos','prefs'];
+const KEYS = ['clientes','produtos','corretores','peso','treinos','alimentacao','livros','cursos','prefs','tarefas'];
 const ETAPAS = ['Novo lead','Contato feito','Visita agendada','Visita efetuada','Simulação','Análise de crédito','Proposta','Documentação','Venda','Perdido'];
 const VI = ETAPAS.indexOf('Venda');
 const ATIVAS = ETAPAS.slice(0, VI);
@@ -83,7 +83,8 @@ const DEF = () => ({
   treinos: {rotinas: [], feitos: []},
   alimentacao: {metas: null, refeicoes: []},
   livros: {items: [], meta: 12, log: []},
-  cursos: {items: []}
+  cursos: {items: []},
+  tarefas: []
 });
 let S = DEF();
 let me = null;             // usuário Firebase
@@ -134,6 +135,7 @@ async function loadUserData(){
   const d = DEF();
   snaps.forEach((s, i) => { const k = KEYS[i]; S[k] = (s && s.exists && s.data().v !== undefined) ? s.data().v : d[k]; });
   if (!S.corretores.length) S.corretores = d.corretores;
+  if (!Array.isArray(S.tarefas)) S.tarefas = [];
   let mig = false; S.clientes.forEach(c => { if (c.etapa === 'Visita') { c.etapa = 'Visita agendada'; mig = true; } }); if (mig) save('clientes');
   if (!S.prefs || !S.prefs.catalogo) {           // completa a lista com todos os empreendimentos, uma vez
     const have = new Set(S.produtos.map(p => normNome(p.nome)));
@@ -433,6 +435,8 @@ function viewHoje(){
   dueClientes().forEach(c => tasks.push({k:'cli', id:c.id, t:`Retornar ${c.nome}`, s:[P(c.produtoId).nome, B(c.corretorId).nome, whenLabel(c.lembrete)], done:false, late:c.lembrete.slice(0,10) < t, cor:P(c.produtoId).cor}));
   S.clientes.filter(c => (c.contatos||[]).some(x => x.slice(0,10) === t) && !tasks.some(x => x.id === c.id)).forEach(c => tasks.push({k:'cli', id:c.id, t:`Retorno: ${c.nome}`, s:[P(c.produtoId).nome], done:true, cor:P(c.produtoId).cor}));
   atendDia(t).forEach(a => tasks.push({k:'at', id:a.id, t:a.titulo + (a.cliente ? ' · ' + a.cliente : ''), s:[a.inicio.slice(11,16), a.local||''], done: parseDT(endOf(a.inicio, a.duracao||60)) < now}));
+  tarefasAtrasadas().forEach(x => tasks.push({k:'tar', id:x.id, t:x.titulo, s:[x.categoria, x.prioridade === 'alta' ? 'prioridade alta' : ''], done:false, late:true}));
+  tarefasDia(t).forEach(x => tasks.push({k: x.tipo === 'compromisso' ? 'comp' : 'tar', id:x.id, t:x.titulo, s:[x.hora || (x.tipo === 'tarefa' ? 'Hoje' : ''), x.categoria, x.local || ''], done: x.tipo === 'tarefa' ? !!x.feitaEm : (x.hora ? parseDT(endOf(t + 'T' + x.hora, x.duracao || 60)) < now : false)}));
   tasks.push({k:'peso', t:'Registrar peso', s:[S.peso.items.length ? 'Último: ' + fmt(pesoSorted().slice(-1)[0].kg, 1) + ' kg' : 'Primeiro registro'], done:S.peso.items.some(p => p.data === t)});
   const rot = rotinasDe(t);
   if (rot.length) tasks.push({k:'treino', t:'Treino: ' + rot.map(r => r.nome).join(', '), s:[(rot[0].exercicios||[]).length + ' exercícios'], done:treinoFeito(t)});
@@ -450,6 +454,7 @@ function viewHoje(){
   const pend = tasks.filter(x => !x.done), feitas = tasks.filter(x => x.done);
   const taskRow = x => `<div class="row${x.done ? ' done' : ''}" data-flip="${x.k}${x.id||''}">
       ${x.k === 'cli' && !x.done ? `<button class="check" data-act="contato" data-id="${x.id}" aria-label="Marcar retorno feito">${'<svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>'}</button>`
+        : x.k === 'tar' ? `<button class="check${x.done ? ' on' : ''}" data-act="tarefaOk" data-id="${x.id}" aria-label="Concluir tarefa"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button>`
         : `<span class="check${x.done ? ' on' : ''}"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>`}
       <button class="grow rowbtn" data-act="taskgo" data-k="${x.k}" data-id="${x.id||''}"><span class="grow"><span class="t">${esc(x.t)}</span>
       <span class="s">${x.cor ? `<i class="dot" style="background:${x.cor}"></i>` : ''}${x.s.filter(Boolean).map(s => typeof s === 'object' ? `<span class="${s.cls}">${esc(s.txt)}</span>` : `<span>${esc(s)}</span>`).join('<span>·</span>')}</span></span>
@@ -584,15 +589,21 @@ function clienteCard(c){
 }
 
 /* ================= AGENDA ================= */
+/* ---------- tarefas e compromissos pessoais ---------- */
+const CATS_TAREFA = ['Trabalho','Equipe','Pessoal','Saúde','Estudos','Casa','Finanças'];
+const tarefasDia = dia => (S.tarefas || []).filter(x => x.data === dia).sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+const tarefasAtrasadas = () => (S.tarefas || []).filter(x => x.tipo === 'tarefa' && !x.feitaEm && x.data < today()).sort(byKey('data'));
 function viewAgenda(){
   const sel = ui.agendaDia, t = today();
   const d = parseD(sel), off = (d.getDay() + 6) % 7, ini = addDays(sel, -off);
   const days = [...Array(7)].map((_, i) => addDays(ini, i));
-  const marks = new Set([...atend.filter(a => a.status !== 'cancelado').map(a => a.inicio.slice(0,10)), ...ativos().filter(c => c.lembrete).map(c => c.lembrete.slice(0,10))]);
+  const marks = new Set([...atend.filter(a => a.status !== 'cancelado').map(a => a.inicio.slice(0,10)), ...ativos().filter(c => c.lembrete).map(c => c.lembrete.slice(0,10)), ...(S.tarefas || []).map(x => x.data)]);
   const items = [];
   atendDia(sel).forEach(a => items.push({tipo:'a', hora:a.inicio.slice(11,16), a}));
   ativos().filter(c => c.lembrete && c.lembrete.slice(0,10) === sel).forEach(c => items.push({tipo:'r', hora:c.lembrete.slice(11,16), c}));
-  const g = gcache[sel], uids = new Set(atend.map(a => a.iCalUID).filter(Boolean)), cids = new Set(S.clientes.map(c => c.calEventId).filter(Boolean));
+  tarefasDia(sel).forEach(x => items.push({tipo: x.tipo === 'compromisso' ? 'c' : 't', hora: x.hora || '', x}));
+  if (sel === t) tarefasAtrasadas().forEach(x => items.push({tipo:'t', hora:'', x, atrasada:true}));
+  const g = gcache[sel], uids = new Set(atend.map(a => a.iCalUID).filter(Boolean)), cids = new Set([...S.clientes.map(c => c.calEventId), ...(S.tarefas || []).map(x => x.calEventId)].filter(Boolean));
   if (Array.isArray(g)) g.filter(e => !uids.has(e.iCalUID) && !cids.has(e.id)).forEach(e => items.push({tipo:'g', hora:e.start.dateTime ? localDT(new Date(e.start.dateTime)).slice(11,16) : '', e}));
   items.sort((a, b) => (a.hora || '00:00').localeCompare(b.hora || '00:00'));
   const titleD = parseD(sel);
@@ -604,6 +615,13 @@ function viewAgenda(){
         <div class="bd"><div class="t" style="font-weight:600">${esc(a.titulo)}${a.cliente ? ' · ' + esc(a.cliente) : ''}${a.status === 'realizado' ? ' <span class="pill ok">efetuada</span>' : ''}</div>
         <div class="s small muted">${[a.produto, a.local].filter(Boolean).map(esc).join(' · ')}</div>
         <div class="faces">${(a.participantes||[]).map(u => face(u)).join('')}</div></div></button>`; }
+    if (it.tipo === 't') { const x = it.x;
+      return `<div class="evt tk${x.feitaEm ? ' done' : ''}" data-flip="t${x.id}"><div class="tm num">${x.hora || (it.atrasada ? '<span class="down">' + ddmm(x.data) + '</span>' : 'Dia')}<small>${it.atrasada ? 'atrasada' : 'tarefa'}</small></div>
+        <div class="bd" style="display:flex;gap:10px;align-items:flex-start"><button class="check${x.feitaEm ? ' on' : ''}" data-act="tarefaOk" data-id="${x.id}" aria-label="Concluir tarefa"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button>
+        <button class="grow rowbtn" data-act="abrirTarefa" data-id="${x.id}" style="display:block;min-width:0"><span class="t" style="display:block;font-weight:600">${esc(x.titulo)}</span><span class="s small muted">${[x.categoria, x.prioridade === 'alta' ? 'prioridade alta' : '', x.notas].filter(Boolean).map(esc).join(' · ')}</span></button></div></div>`; }
+    if (it.tipo === 'c') { const x = it.x;
+      return `<button class="evt cp rowbtn" style="display:grid" data-act="abrirTarefa" data-id="${x.id}" data-flip="t${x.id}"><div class="tm num">${x.hora || 'Dia'}<small>${x.hora ? endOf(x.data + 'T' + x.hora, x.duracao || 60).slice(11,16) : 'todo'}</small></div>
+        <div class="bd"><div class="t" style="font-weight:600">${esc(x.titulo)}</div><div class="s small muted">${['Compromisso', x.categoria, x.local].filter(Boolean).map(esc).join(' · ')}</div></div></button>`; }
     if (it.tipo === 'r') { const c = it.c;
       return `<button class="evt r rowbtn" style="display:grid" data-act="abrirCliente" data-id="${c.id}"><div class="tm num">${it.hora}<small>retorno</small></div>
         <div class="bd"><div class="t" style="font-weight:600">${esc(c.nome)}</div><div class="s small muted">${esc(P(c.produtoId).nome)} · ${esc(c.etapa)} · ${esc(B(c.corretorId).nome)}</div></div></button>`; }
@@ -611,7 +629,7 @@ function viewAgenda(){
     return `<a class="evt g" href="${esc(e.htmlLink)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><div class="tm num">${it.hora || 'Dia'}<small>${e.end && e.end.dateTime ? localDT(new Date(e.end.dateTime)).slice(11,16) : 'todo'}</small></div>
       <div class="bd"><div class="t" style="font-weight:600">${esc(e.summary || '(sem título)')}</div><div class="s small muted">Google Agenda${e.location ? ' · ' + esc(e.location) : ''}</div></div></a>`;
   };
-  return head(`Semana de ${ddmm(ini)}`, 'Agenda', addBtn('novoAtend', 'Novo atendimento')) + `
+  return head(`Semana de ${ddmm(ini)}`, 'Agenda', addBtn('novoAgenda', 'Adicionar na agenda')) + `
   <section class="card rv">
     <div class="sec-row" style="margin-bottom:10px"><button class="round ghost" data-act="semana" data-v="-7" aria-label="Semana anterior">${ic('left','s')}</button>
       <b>${MES[parseD(ini).getMonth()]} ${parseD(ini).getFullYear()}</b>
@@ -620,7 +638,7 @@ function viewAgenda(){
   </section>
   ${hasTok() ? '' : `<div class="banner rv">${ic('agenda')}<div class="grow"><b>Conecte o Google Agenda</b><br><span class="muted">Para ver seus compromissos e enviar convites dos atendimentos.</span></div><button class="mini" data-act="conectarAgenda">Conectar</button></div>`}
   <section class="card rv"><div class="sec-row"><h2>${esc(label)}</h2>${g === 'loading' ? '<span class="small muted">Carregando agenda…</span>' : g === 'err' ? '<button class="link small" data-act="recarregarDia">Tentar de novo</button>' : ''}</div>
-    ${items.length ? `<div class="list">${items.map(row).join('')}</div>` : empty('agenda', 'Dia livre', 'Marque um atendimento com um parceiro e o convite vai para a agenda dele.', `<button class="btn pri" data-act="novoAtend">${ic('plus','s')}Novo atendimento</button>`)}
+    ${items.length ? `<div class="list">${items.map(row).join('')}</div>` : empty('agenda', 'Dia livre', 'Adicione uma visita, um compromisso ou uma tarefa para este dia.', `<button class="btn pri" data-act="novoAgenda">${ic('plus','s')}Adicionar</button>`)}
   </section>`;
 }
 function face(u){
@@ -993,6 +1011,64 @@ async function gravarAtend(data, old, extras){
   }
 }
 
+function sheetNovoAgenda(){
+  const op = (act, icn, t, d) => `<button type="button" class="row rowbtn opcao" data-act="${act}"><span class="op-ic">${ic(icn)}</span><span class="grow"><span class="t" style="display:block">${t}</span><span class="s">${d}</span></span>${ic('chev','s chev')}</button>`;
+  openSheet('Adicionar na agenda', `<div class="list">
+    ${op('novoAtend', 'users2', 'Visita ou atendimento', 'Com cliente, produto e parceiros. Envia convite pela Google Agenda.')}
+    ${op('novoCompromisso', 'clock', 'Compromisso', 'Reunião, médico, treinamento: com horário, sem cliente.')}
+    ${op('novaTarefa', 'check', 'Tarefa', 'Algo para fazer no dia, com ou sem horário. Você marca quando concluir.')}
+  </div>`);
+}
+function sheetTarefa(x, tipo){
+  const novo = !x; tipo = x ? x.tipo : tipo;
+  const comp = tipo === 'compromisso', dia = ui.tab === 'agenda' ? ui.agendaDia : today();
+  x = x || {tipo, titulo:'', data: dia, hora: comp ? '09:00' : '', duracao: 60, local:'', categoria: 'Trabalho', prioridade:'normal', notas:'', repetir:'', cal: comp};
+  openSheet(novo ? (comp ? 'Novo compromisso' : 'Nova tarefa') : (comp ? 'Compromisso' : 'Tarefa'), `<form class="form" data-form="tarefa" data-id="${x.id || ''}" data-tipo="${tipo}">
+    <div class="field"><label for="tTit">${comp ? 'O que é' : 'O que fazer'}</label><input class="inp" id="tTit" value="${esc(x.titulo)}" required ${novo ? 'autofocus' : ''} autocomplete="off" placeholder="${comp ? 'Reunião de equipe, dentista, treinamento…' : 'Enviar tabela para a equipe, pagar boleto…'}"></div>
+    <div class="f2"><div class="field"><label for="tDia">Dia</label><input class="inp" id="tDia" type="date" value="${x.data}" required></div>
+      <div class="field"><label for="tHora">Hora${comp ? '' : ' (opcional)'}</label><input class="inp" id="tHora" type="time" value="${x.hora || ''}" ${comp ? 'required' : ''}></div></div>
+    ${comp ? `<div class="f2"><div class="field"><label for="tDur">Duração</label><select class="inp" id="tDur">${[[30,'30 min'],[60,'1 h'],[90,'1h30'],[120,'2 h'],[180,'3 h'],[240,'4 h']].map(([v,l]) => opt(String(v), l, String(x.duracao || 60))).join('')}</select></div>
+      <div class="field"><label for="tLocal">Local</label><input class="inp" id="tLocal" value="${esc(x.local || '')}" placeholder="Opcional"></div></div>` : ''}
+    <div class="f2"><div class="field"><label for="tCat">Categoria</label><select class="inp" id="tCat">${CATS_TAREFA.map(c => opt(c, c, x.categoria)).join('')}</select></div>
+      ${comp ? `<div class="field"><label for="tRep">Repetir</label><select class="inp" id="tRep">${[['','Não repetir'],['7','Toda semana'],['14','A cada 2 semanas'],['30','Todo mês']].map(([v,l]) => opt(v, l, x.repetir || '')).join('')}</select></div>`
+        : `<div class="field"><label for="tPri">Prioridade</label><select class="inp" id="tPri">${[['normal','Normal'],['alta','Alta']].map(([v,l]) => opt(v, l, x.prioridade)).join('')}</select></div>`}</div>
+    ${!comp && novo ? `<div class="field"><label for="tRep">Repetir</label><select class="inp" id="tRep">${[['','Não repetir'],['1','Todo dia'],['7','Toda semana'],['30','Todo mês']].map(([v,l]) => opt(v, l, '')).join('')}</select></div>` : ''}
+    <div class="field"><label for="tNotas">Observações</label><textarea class="inp" id="tNotas" rows="3">${esc(x.notas || '')}</textarea></div>
+    <div class="switch"><div><b>Colocar na Google Agenda</b><div class="small muted">${comp ? 'Cria o evento com lembrete' : 'Só para tarefas com horário'}</div></div><button type="button" class="sw${x.cal || x.calEventId ? ' on' : ''}" id="tCal" data-act="sw" role="switch" aria-checked="${!!(x.cal || x.calEventId)}"></button></div>
+    <button class="btn pri wide" id="tSave">${novo ? 'Salvar' : 'Salvar alterações'}</button>
+    ${!novo && !comp ? `<button type="button" class="btn sec wide" data-act="tarefaOk" data-id="${x.id}">${x.feitaEm ? 'Marcar como não feita' : ic('check','s') + 'Concluir tarefa'}</button>` : ''}
+    ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir</button>${confirmBox('Excluir ' + (comp ? 'este compromisso' : 'esta tarefa') + '?', 'delTarefa', x.id)}` : ''}
+  </form>`);
+}
+async function syncTarefaCal(x, want){
+  const comHora = !!x.hora;
+  if (want && comHora) {
+    const ini = x.data + 'T' + x.hora, dur = x.tipo === 'compromisso' ? (x.duracao || 60) : 30;
+    const body = {summary: (x.tipo === 'tarefa' ? 'Tarefa: ' : '') + x.titulo, location: x.local || '', description: [x.categoria, x.notas].filter(Boolean).join('\n') + '\n\nCriado pelo Foco.',
+      start: evTime(ini), end: evTime(endOf(ini, dur)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: x.tipo === 'compromisso' ? 30 : 0}]}};
+    if (x.calEventId) { try { await cal('calendars/primary/events/' + x.calEventId, {method: 'PATCH', body: JSON.stringify(body)}); return; } catch(e) { x.calEventId = null; } }
+    const ev = await cal('calendars/primary/events', {method: 'POST', body: JSON.stringify(body)}); x.calEventId = ev.id;
+  } else if (x.calEventId) { try { await cal('calendars/primary/events/' + x.calEventId, {method: 'DELETE'}); } catch(e) {} x.calEventId = null; }
+}
+async function saveTarefa(form){
+  const id = form.dataset.id, tipo = form.dataset.tipo, novo = !id;
+  const x = novo ? {id: uid(), tipo, criado: today()} : find(S.tarefas, id);
+  Object.assign(x, {titulo: val('tTit'), data: val('tDia'), hora: val('tHora'), categoria: val('tCat'), notas: val('tNotas')});
+  if (tipo === 'compromisso') Object.assign(x, {duracao: +val('tDur') || 60, local: val('tLocal'), repetir: val('tRep')}); else x.prioridade = val('tPri');
+  const want = $('#tCal').classList.contains('on'); x.cal = want;
+  if (want && !x.hora) { toast(tipo === 'tarefa' ? 'Para ir à Google Agenda, a tarefa precisa de horário.' : 'Escolha o horário.', true); return; }
+  const btn = $('#tSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Salvando';
+  if (want && !hasTok()) { try { await requestTok(); } catch(e) {} }
+  const reps = novo && +val('tRep') ? +val('tRep') : 0;
+  const lista = [x];
+  if (reps) { const n = reps === 1 ? 13 : reps === 7 ? 11 : reps === 14 ? 5 : 5; for (let i = 1; i <= n; i++) { const d = reps === 30 ? (dd => { const z = parseD(x.data); z.setMonth(z.getMonth() + i); return ymd(z); })() : addDays(x.data, reps * i); lista.push(Object.assign({}, x, {id: uid(), data: d, calEventId: null, serie: x.id})); } x.serie = x.id; }
+  let falhou = false;
+  for (const it of lista) { try { await syncTarefaCal(it, want); } catch(e) { falhou = true; } }
+  if (novo) S.tarefas.push(...lista);
+  save('tarefas'); ui.agendaDia = x.data; delete gcache[x.data];
+  closeSheet(); render(false);
+  toast(falhou ? 'Salvo no Foco, mas a Google Agenda falhou' : (novo ? (tipo === 'compromisso' ? 'Compromisso salvo' : 'Tarefa criada') + (reps ? ` com ${lista.length} repetições` : '') : 'Atualizado'), falhou);
+}
 function sheetRotina(r){
   const novo = !r; r = r || {nome:'', dias:[], exercicios:[]};
   openSheet(novo ? 'Nova rotina' : 'Editar rotina', `<form class="form" data-form="rotina" data-id="${r.id || ''}">
@@ -1203,6 +1279,7 @@ const ACT = {
     const k = el.dataset.k;
     if (k === 'cli') return sheetCliente(find(S.clientes, el.dataset.id));
     if (k === 'at') return openAtend(el.dataset.id);
+    if (k === 'tar' || k === 'comp') return sheetTarefa(find(S.tarefas, el.dataset.id));
     if (k === 'peso') { ui.corpo = 'peso'; switchTab('corpo'); setTimeout(() => { const i = $('#pesoKg'); if (i) i.focus(); }, 450); return; }
     if (k === 'treino') { ui.corpo = 'treino'; return switchTab('corpo'); }
     if (k === 'alim') { ui.corpo = 'alimentacao'; return switchTab('corpo'); }
@@ -1253,6 +1330,19 @@ const ACT = {
   conectarAgenda: async () => { try { await requestTok(); Object.keys(gcache).forEach(k => delete gcache[k]); toast('Google Agenda conectada'); closeSheet(); render(false); } catch(e) { toast(e.message, true); } },
   recarregarDia: () => { delete gcache[ui.agendaDia]; render(false); },
   novoAtend: () => sheetAtend(null),
+  novoAgenda: () => sheetNovoAgenda(),
+  novoCompromisso: () => sheetTarefa(null, 'compromisso'),
+  novaTarefa: () => sheetTarefa(null, 'tarefa'),
+  abrirTarefa: el => sheetTarefa(find(S.tarefas, el.dataset.id)),
+  tarefaOk: el => {
+    const x = find(S.tarefas, el.dataset.id); if (!x) return;
+    x.feitaEm = x.feitaEm ? null : today(); save('tarefas');
+    if (el.classList.contains('check')) { el.classList.toggle('on', !!x.feitaEm); if (x.feitaEm) el.classList.add('pop'); }
+    closeSheet(); setTimeout(() => render(false), RM.matches ? 0 : 360);
+    if (x.feitaEm) toast('Tarefa concluída');
+  },
+  delTarefa: async el => { const x = find(S.tarefas, el.dataset.id); if (x && x.calEventId && hasTok()) { try { await cal('calendars/primary/events/' + x.calEventId, {method: 'DELETE'}); } catch(e) {} }
+    S.tarefas = S.tarefas.filter(y => y.id !== el.dataset.id); save('tarefas'); closeSheet(); render(false); toast('Excluído'); },
   abrirAtend: el => openAtend(el.dataset.id),
   delAtend: async el => {
     const a = find(atend, el.dataset.id); if (!a) return;
@@ -1371,6 +1461,7 @@ function addPages(id, n, abs){
 const FORMS = {
   cliente: f => saveCliente(f),
   atend: f => saveAtend(f),
+  tarefa: f => saveTarefa(f),
   peso: () => {
     const kg = num('pesoKg'), d = val('pesoData'); if (!kg || !d) return;
     S.peso.items = S.peso.items.filter(p => p.data !== d); S.peso.items.push({data: d, kg: +kg.toFixed(1)});
