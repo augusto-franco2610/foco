@@ -1393,5 +1393,20 @@ if (!configOk) {
   auth.onAuthStateChanged(onUser);
 }
 addEventListener('beforeunload', () => { if (pending.size) flush(); });
+// Atualização automática: compara a versão publicada com a carregada e recarrega sem cache
+async function checarVersao(){
+  try {
+    const r = await fetch('versao.json?t=' + Date.now(), {cache: 'no-store'}); if (!r.ok) return;
+    const v = (await r.json()).v;
+    if (v && window.FOCO_VERSAO && v !== window.FOCO_VERSAO && !sessionStorage.getItem('foco-up-' + v)) {
+      sessionStorage.setItem('foco-up-' + v, '1');
+      if (pending.size) await flush();
+      location.replace(location.pathname + '?v=' + v + location.hash);
+    }
+  } catch(e) {}
+}
+checarVersao();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checarVersao(); });
+setInterval(checarVersao, 5 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (document.hidden && pending.size) flush(); });
 })();

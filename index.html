@@ -14,10 +14,11 @@
 <link rel="manifest" href="manifest.json">
 <meta name="application-name" content="Foco">
 <script>
+  window.FOCO_VERSAO = '20261028231036';
   // aplica o tema antes de pintar, sem flash
   try{var t=localStorage.getItem('foco-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-app',t)}catch(e){}
 </script>
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=20261028231036">
 </head>
 <body>
 
@@ -61,7 +62,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="config.js"></script>
-<script src="app.js"></script>
+<script src="config.js?v=20261028231036"></script>
+<script src="app.js?v=20261028231036"></script>
 </body>
 </html>
