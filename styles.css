@@ -316,3 +316,10 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
 .fstage .stk i.tq{background:var(--err)} .fstage .stk i.tm{background:var(--warn)} .fstage .stk i.tf{background:var(--accent)}
+
+.vgv{font-size:26px}
+.fstage.vg{grid-template-columns:96px 1fr 74px;align-items:center}
+.fstage.vg .tr2{display:grid;gap:4px}
+.fstage.vg .tr{height:10px;border-radius:5px}
+.fstage.vg .tr i{border-radius:5px}
+.fstage.vg .ct{line-height:1.25;text-align:right;font-weight:600}

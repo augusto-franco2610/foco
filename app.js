@@ -193,9 +193,9 @@ const evTime = (dt) => ({dateTime: dt + ':00', timeZone: TZ});
 /* ================= animação ================= */
 const mem = new Map();
 function tween(el, prop, a, b){ el.style.transition = 'none'; el.style[prop] = a; el.getBoundingClientRect(); el.style.transition = ''; el.style[prop] = b; }
-function countUp(el, a, b, dec){
+function countUp(el, a, b, dec, f){
   const t0 = performance.now(), D = 900;
-  const step = t => { const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(a + (b - a) * e, dec); if (k < 1) requestAnimationFrame(step); };
+  const step = t => { const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3); el.textContent = f ? f(a + (b - a) * e) : fmt(a + (b - a) * e, dec); if (k < 1) requestAnimationFrame(step); };
   requestAnimationFrame(step);
 }
 function animate(root){
@@ -203,6 +203,7 @@ function animate(root){
   root.querySelectorAll('[data-count]').forEach(el => {
     const k = 'c' + el.dataset.k, v = +el.dataset.count, dec = +(el.dataset.dec || 0);
     const from = mem.has(k) ? mem.get(k) : 0; mem.set(k, v);
+    if (el.dataset.brl) { if (still || from === v) el.textContent = brlCurto(v); else countUp(el, from, v, dec, brlCurto); return; }
     if (still || from === v) el.textContent = fmt(v, dec); else countUp(el, from, v, dec);
   });
   root.querySelectorAll('[data-ring]').forEach(el => {
@@ -517,11 +518,40 @@ function viewHoje(){
     ${pend.length ? `<div class="list">${pend.map(taskRow).join('')}</div>` : empty('check', 'Tudo feito por hoje', 'Os retornos de clientes e as rotinas do dia aparecem aqui.')}
   </section>
   ${feitas.length ? `<section class="card rv"><h2>Feitas · ${feitas.length}</h2><div class="list">${feitas.map(taskRow).join('')}</div></section>` : ''}
+  ${cardVGV()}
   ${cardPorCorretor()}
   ${porProd.length ? `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por produto</h2></div><div class="funnel">${porProd.map((x, j) => `<button class="fstage" data-act="goprod" data-v="${x.p.id}" style="--j:${j}"><span class="nm">${esc(x.p.nome)}</span><span class="tr"><i style="background:${x.p.cor};transform:scaleX(0)" data-bar="${x.n / maxP}" data-k="pp${x.p.id}"></i></span><span class="ct num">${x.n}</span></button>`).join('')}</div></section>` : ''}
   `;
 }
 
+/* ---------- VGV ---------- */
+const parseBRL = t => { const v = String(t||'').replace(/[^\d,.-]/g,''); if (!v) return 0; const n = v.includes(',') ? v.replace(/\./g,'').replace(',', '.') : (/\.\d{3}($|\.)/.test(v) ? v.replace(/\./g,'') : v); return Math.max(0, parseFloat(n) || 0); };
+const brl = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0});
+const brlCurto = v => v >= 1e6 ? 'R$ ' + fmt(v / 1e6, v >= 1e7 ? 1 : 2) + ' mi' : v >= 1e3 ? 'R$ ' + fmt(v / 1e3) + ' mil' : brl(v);
+const dataVenda = c => c.vendaEm || ((c.historico || []).filter(h => h.para === 'Venda').map(h => h.em.slice(0,10)).pop()) || (c.criado || '').slice(0,10);
+function marcarVenda(c){ if (c.etapa === 'Venda') { if (!c.vendaEm) c.vendaEm = today(); } else delete c.vendaEm; }
+function vgv(lista){
+  const t = today(), mes = t.slice(0,7), ano = t.slice(0,4), vendas = lista.filter(c => c.etapa === 'Venda');
+  const soma = arr => arr.reduce((a, c) => a + (+c.valor || 0), 0);
+  return {previsto: soma(lista.filter(c => ATIVAS.includes(c.etapa))), semValor: lista.filter(c => ATIVAS.includes(c.etapa) && !c.valor).length,
+    mes: soma(vendas.filter(c => dataVenda(c).slice(0,7) === mes)), ano: soma(vendas.filter(c => dataVenda(c).slice(0,4) === ano)), nMes: vendas.filter(c => dataVenda(c).slice(0,7) === mes).length};
+}
+function cardVGV(){
+  if (!S.clientes.length) return '';
+  const v = vgv(S.clientes), mesNome = new Date().toLocaleDateString('pt-BR', {month:'long'});
+  const porCor = S.corretores.map(b => ({b, ...vgv(S.clientes.filter(c => c.corretorId === b.id))})).filter(r => r.previsto || r.mes).sort((a, b) => (b.previsto + b.mes) - (a.previsto + a.mes));
+  const max = Math.max(1, ...porCor.map(r => Math.max(r.previsto, r.mes)));
+  return `<section class="card rv"><div class="sec-row"><h2>VGV</h2><button class="link small" data-act="goclientes" data-v="todos">Ver clientes</button></div>
+    <div class="grid2" style="gap:16px">
+      <div class="kpi"><span class="lbl">Previsto em andamento</span><span class="val num vgv" data-count="${Math.round(v.previsto)}" data-k="vgvp" data-brl="1">${brlCurto(v.previsto)}</span><span class="delta flat">${v.semValor ? v.semValor + ' clientes sem valor' : 'Todos com valor'}</span></div>
+      <div class="kpi"><span class="lbl">Efetuado em ${mesNome}</span><span class="val num vgv up" data-count="${Math.round(v.mes)}" data-k="vgvm" data-brl="1">${brlCurto(v.mes)}</span><span class="delta flat">${v.nMes} ${v.nMes === 1 ? 'venda' : 'vendas'} · ano ${brlCurto(v.ano)}</span></div>
+    </div>
+    ${porCor.length ? `<div class="funnel" style="margin-top:16px">${porCor.map((r, j) => `<button class="fstage vg" data-act="goclientes" data-v="${r.b.id}" style="--j:${j}"><span class="nm">${esc(r.b.nome)}</span>
+      <span class="tr2"><span class="tr"><i style="transform:scaleX(0)" data-bar="${r.previsto / max}" data-k="vp${r.b.id}"></i></span><span class="tr"><i style="background:var(--ok);transform:scaleX(0)" data-bar="${r.mes / max}" data-k="vm${r.b.id}"></i></span></span>
+      <span class="ct num small">${brlCurto(r.previsto)}<br><span class="up">${brlCurto(r.mes)}</span></span></button>`).join('')}</div>
+      <div class="legend small muted"><span><i style="background:var(--accent)"></i>Previsto</span><span><i style="background:var(--ok)"></i>Efetuado no mês</span></div>` : ''}
+  </section>`;
+}
 function cardPorCorretor(){
   const at = ativos(); if (!at.length) return '';
   const rows = S.corretores.map(b => { const cs = at.filter(c => c.corretorId === b.id); return {b, n: cs.length, q: cs.filter(c => c.temp === 'Quente').length, m: cs.filter(c => c.temp === 'Morno').length, f: cs.filter(c => c.temp === 'Frio').length,
@@ -550,7 +580,8 @@ function viewClientes(){
   });
   const conv = base.length ? counts[VI] / base.length : 0;
   const chips = [['todos','Todos'],['quentes','Quentes'], ...S.corretores.map(c => [c.id, c.nome])];
-  return head(`${ativos().length} ativos · ${counts[VI]} vendas`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
+  const vf = vgv(base);
+  return head(`${ativos().length} ativos · VGV ${brlCurto(vf.previsto)}`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
   <div class="chips rv">${chips.map(([k,l]) => `<button class="chip${fc === k ? ' on' : ''}" data-act="fcor" data-v="${k}">${esc(l)}</button>`).join('')}</div>
   <div class="rv"><label class="sr" for="fProd">Produto</label><select class="inp" id="fProd" data-change="fprod"><option value="todos">Todos os produtos</option>${prodOptions(fp)}</select></div>
   <section class="card rv"><div class="sec-row"><h2>Funil</h2>${fe ? `<button class="link" data-act="fetapa" data-v="">Limpar</button>` : `<span class="small muted">Conversão <b class="num">${fmt(conv*100)}%</b></span>`}</div>
@@ -567,7 +598,7 @@ function clienteCard(c){
     <div class="top"><div class="grow" style="min-width:0;text-align:left"><div class="nm">${esc(c.nome)}</div>
       <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}</div></div>
       <span class="when ${w.cls}">${esc(w.txt)}</span></div>
-    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${c.temp}">●</span>${c.temp}</span></div>
+    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${c.temp}">●</span>${c.temp}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}</div>
     ${idx >= 0 && idx <= VI ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / (VI + 1)}" data-k="cb${c.id}"></i></div>` : ''}
   </button>`;
 }
@@ -820,6 +851,7 @@ function sheetCliente(c){
       <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
+    <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
     <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div><button type="button" class="sw${c.calEventId ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${!!c.calEventId}"></button></div>
     <div class="field"><label for="cNotas">Anotações</label><textarea class="inp" id="cNotas" placeholder="Renda, FGTS, preferência de planta, objeções…">${esc(c.notas)}</textarea></div>
@@ -835,7 +867,8 @@ async function saveCliente(form){
   const corNome = val('cCor');
   let cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
   if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); }
-  Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas')});
+  Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
+  marcarVenda(c);
   if (etapaAnt && etapaAnt !== c.etapa) (c.historico = c.historico || []).push({de: etapaAnt, para: c.etapa, em: new Date().toISOString()});
   if (novo) S.clientes.push(c);
   const wantCal = $('#cCal').classList.contains('on');
@@ -1095,7 +1128,7 @@ const ACT = {
   avancar: el => {
     const c = find(S.clientes, el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= VI) return;
     (c.historico = c.historico || []).push({de: c.etapa, para: ETAPAS[i+1], em: new Date().toISOString()});
-    c.etapa = ETAPAS[i+1]; save('clientes'); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
+    c.etapa = ETAPAS[i+1]; marcarVenda(c); save('clientes'); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
   },
   novoCliente: () => sheetCliente(null),
   abrirCliente: el => sheetCliente(find(S.clientes, el.dataset.id)),
