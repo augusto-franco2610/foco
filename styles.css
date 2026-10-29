@@ -184,7 +184,7 @@ svg.i.s{width:17px;height:17px}
 
 /* macro rows */
 .macro{display:grid;gap:6px}
-.macro .top{display:flex;justify-content:space-between;font-size:14px}
+.macro .top{display:flex;justify-content:space-between;gap:8px;font-size:14px}
 .macro .top b{font-weight:600}
 
 /* client card */

@@ -303,7 +303,7 @@ const rotinasDe = dia => S.treinos.rotinas.filter(r => (r.dias||[]).includes(par
 const treinoFeito = dia => S.treinos.feitos.some(f => f.data === dia);
 const refeicoesDe = dia => S.alimentacao.refeicoes.filter(r => r.data === dia);
 const somaDia = dia => refeicoesDe(dia).reduce((a, r) => ({p:a.p+(+r.p||0), c:a.c+(+r.c||0), g:a.g+(+r.g||0), k:a.k+kcalOf(r)}), {p:0,c:0,g:0,k:0});
-const metaKcal = () => S.alimentacao.metas ? kcalOf(S.alimentacao.metas) : 0;
+const metaKcal = () => S.alimentacao.metas ? (S.alimentacao.metas.kcal || kcalOf(S.alimentacao.metas)) : 0;
 const livrosAtivos = () => S.livros.items.filter(l => !l.concluidoEm);
 const lidosAno = () => S.livros.items.filter(l => l.concluidoEm && l.concluidoEm.slice(0,4) === today().slice(0,4)).length;
 const cursoProx = c => (c.etapas||[]).find(e => !e.feitaEm);
@@ -783,17 +783,33 @@ function sheetRefeicao(){
   const upd = () => { const k = kcalOf({p:num('mP'), c:num('mC'), g:num('mG')}); $('#mK').textContent = fmt(k) + ' kcal'; };
   ['mP','mC','mG'].forEach(i => $('#' + i).addEventListener('input', upd));
 }
+const DIVISOES = {equilibrada: ['Equilibrada', 30, 40, 30], proteica: ['Mais proteína', 40, 35, 25], lowcarb: ['Low carb', 40, 20, 40]};
 function sheetMetas(){
-  const m = S.alimentacao.metas || {p:'', c:'', g:''};
+  const m = S.alimentacao.metas || {};
+  const kcal0 = m.kcal || (m.p ? kcalOf(m) : '');
+  const div0 = m.div || 'equilibrada';
+  const pct0 = m.pp ? [m.pp, m.pc, m.pg] : DIVISOES[div0 === 'custom' ? 'equilibrada' : div0].slice(1);
   openSheet('Metas', `<form class="form" data-form="metas">
     <div class="field"><label for="gPeso">Peso alvo (kg)</label><input class="inp num" id="gPeso" type="number" inputmode="decimal" step="0.1" value="${S.peso.meta ?? ''}" placeholder="Opcional"></div>
-    <div class="field"><label>Macros por dia (g)</label><div class="f3"><input class="inp num" id="gP" type="number" inputmode="decimal" placeholder="Proteína" aria-label="Proteína" value="${m.p}"><input class="inp num" id="gC" type="number" inputmode="decimal" placeholder="Carbo" aria-label="Carboidrato" value="${m.c}"><input class="inp num" id="gG" type="number" inputmode="decimal" placeholder="Gordura" aria-label="Gordura" value="${m.g}"></div></div>
-    <div class="sec-row"><span class="muted">Calorias da meta</span><b class="num" id="gK">${m.p !== '' ? fmt(kcalOf(m)) : 0} kcal</b></div>
+    <div class="field"><label for="gKcal">Calorias por dia (kcal)</label><input class="inp num" id="gKcal" type="number" inputmode="numeric" min="800" max="6000" step="10" value="${kcal0}" placeholder="2000"></div>
+    <div class="field"><label>Divisão dos macros</label>${seg('divMacro', [...Object.entries(DIVISOES).map(([k, v]) => [k, v[0]]), ['custom', 'Minha']], div0)}</div>
+    <div class="f3">${[['gPp','Proteína'],['gPc','Carbo'],['gPg','Gordura']].map(([id, l], i) => `<div class="field"><label for="${id}">${l} (%)</label><input class="inp num" id="${id}" type="number" inputmode="numeric" min="0" max="100" value="${pct0[i]}"></div>`).join('')}</div>
+    <div class="card" style="box-shadow:none;display:grid;gap:8px" id="gRes"></div>
     <div class="field"><label for="gLiv">Livros por ano</label><input class="inp num" id="gLiv" type="number" inputmode="numeric" min="0" value="${S.livros.meta ?? 12}"></div>
+    <input type="hidden" id="gDiv" value="${div0}">
     <button class="btn pri wide">Salvar metas</button></form>`);
-  const upd = () => $('#gK').textContent = fmt(kcalOf({p:num('gP'), c:num('gC'), g:num('gG')})) + ' kcal';
-  ['gP','gC','gG'].forEach(i => $('#' + i).addEventListener('input', upd));
+  const upd = () => {
+    const k = num('gKcal'), pp = num('gPp'), pc = num('gPc'), pg = num('gPg'), tot = pp + pc + pg;
+    const g = {p: Math.round(k * pp / 100 / 4), c: Math.round(k * pc / 100 / 4), g: Math.round(k * pg / 100 / 9)};
+    $('#gRes').innerHTML = !k ? '<span class="small muted">Informe as calorias para calcular os gramas de cada macro.</span>'
+      : `<div class="sec-row"><span>Proteína</span><b class="num">${fmt(g.p)} g</b></div><div class="sec-row"><span>Carboidrato</span><b class="num">${fmt(g.c)} g</b></div><div class="sec-row"><span>Gordura</span><b class="num">${fmt(g.g)} g</b></div>`
+        + (tot !== 100 ? `<div class="small down" style="font-weight:600">A soma está em ${fmt(tot)}%. Ajuste para 100%.</div>` : '')
+        + (S.peso.items.length && g.p ? `<div class="small muted">${fmt(g.p / pesoSorted().slice(-1)[0].kg, 1)} g de proteína por kg do seu peso atual</div>` : '');
+  };
+  ['gKcal','gPp','gPc','gPg'].forEach(i => $('#' + i).addEventListener('input', e => { if (i !== 'gKcal') { $('#gDiv').value = 'custom'; markSeg('custom'); } upd(); }));
+  upd();
 }
+function markSeg(k){ const sg = document.querySelector('#sheetBody .seg'); if (!sg) return; sg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === k)); placeThumb(sg); }
 function sheetLivro(l){
   const novo = !l; l = l || {titulo:'', autor:'', paginas:'', lidas:0, prazo:''};
   openSheet(novo ? 'Novo livro' : 'Editar livro', `<form class="form" data-form="livro" data-id="${l.id || ''}">
@@ -916,6 +932,7 @@ const ACT = {
   repMeal: el => { const m = JSON.parse(el.dataset.v); $('#mNome').value = m.n; $('#mP').value = m.p; $('#mC').value = m.c; $('#mG').value = m.g; $('#mP').dispatchEvent(new Event('input')); },
   delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
+  divMacro: el => { const k = el.dataset.v; $('#gDiv').value = k; markSeg(k); if (DIVISOES[k]) { ['gPp','gPc','gPg'].forEach((id, i) => $('#' + id).value = DIVISOES[k][i + 1]); } $('#gKcal').dispatchEvent(new Event('input')); },
   novoLivro: () => sheetLivro(null), editLivro: el => sheetLivro(find(S.livros.items, el.dataset.id)),
   delLivro: el => { S.livros.items = S.livros.items.filter(r => r.id !== el.dataset.id); save('livros'); closeSheet(); render(false); toast('Livro excluído'); },
   pag: el => addPages(el.dataset.id, +el.dataset.v),
@@ -982,8 +999,10 @@ const FORMS = {
     save('alimentacao'); closeSheet(); render(false); toast('Refeição adicionada');
   },
   metas: () => {
+    const k = num('gKcal'), pp = num('gPp'), pc = num('gPc'), pg = num('gPg');
+    if (k && pp + pc + pg !== 100) return toast('A divisão dos macros precisa somar 100%.', true);
     S.peso.meta = val('gPeso') ? +num('gPeso').toFixed(1) : null;
-    S.alimentacao.metas = (num('gP') || num('gC') || num('gG')) ? {p: num('gP'), c: num('gC'), g: num('gG')} : null;
+    S.alimentacao.metas = k ? {kcal: Math.round(k), div: val('gDiv'), pp, pc, pg, p: Math.round(k * pp / 400), c: Math.round(k * pc / 400), g: Math.round(k * pg / 900)} : null;
     S.livros.meta = Math.round(num('gLiv'));
     save('peso', 'alimentacao', 'livros'); closeSheet(); render(false); toast('Metas salvas');
   },
