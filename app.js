@@ -366,15 +366,30 @@ const FRASES = [
   ['m','Cuidar da saúde também é cuidar da carreira.'],
   ['m','{Preparado|Preparada} hoje, {tranquilo|tranquila} amanhã.']
 ];
+// Palpite pelo primeiro nome da conta Google; a pessoa pode corrigir em Ajustes
+const NOMES_F = new Set('ines lourdes beatris alice beatriz isabel raquel ester rute miriam carmen ingrid iris luz liz thais lais yasmin jasmin evelyn kelly shirley sueli suely marli marlene irene helen ellen karen sharon abigail lilian gislaine viviane rosane rosemary rose ruth nicole michele michelle simone denise juliane cristiane daiane eliane rafaele gabriele jaqueline aline caroline adriane luciane solange vitoria vivian miriã agnes mercedes dolores consuelo'.split(' '));
+const NOMES_M = new Set('luca lucca joshua noah elias jonas matias tobias isaias jeremias zacarias andrea nicola josue moises davi levi luan ian ivan juan alan allan ryan bryan kauã kaua ruan iuri yuri wesley sidney stanley rodney'.split(' '));
+const MASC_E = /(?:lipe|rique|orge|andre|herme|cente|naldo|ique|aque|ilhe)$/;
+function generoPorNome(nome){
+  const n = String(nome || '').trim().split(/\s+/)[0].normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  if (!n) return null;
+  if (NOMES_F.has(n)) return 'f';
+  if (NOMES_M.has(n)) return 'm';
+  if (/a$/.test(n)) return 'f';
+  if (/(?:ane|ene|ine|ise|ice|ele|elle|ete|ette|ly|lly|ie)$/.test(n)) return 'f';
+  if (/[oiu]$|[lrsnzmx]$|(?:son|ton)$/.test(n) || MASC_E.test(n)) return 'm';
+  return null;
+}
+const generoAtual = () => (S.prefs && S.prefs.genero) || generoPorNome(me && me.displayName);
 const generoTxt = (t, g) => t.replace(/\{([^|}]*)\|([^}]*)\}/g, (_, m, f) => g === 'f' ? f : m);
 function fraseDoMomento(){
-  const g = S.prefs && S.prefs.genero;
+  const g = generoAtual();
   const pool = FRASES.filter(f => g || !/\{/.test(f[1]));
   const d = parseD(today()), dia = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5);
   return pool[(dia * 7 + (ui.fraseOff || 0)) % pool.length];
 }
 function cardFrase(){
-  const g = S.prefs && S.prefs.genero, f = fraseDoMomento();
+  const g = generoAtual(), f = fraseDoMomento();
   const est = f[0] === 'e';
   return `<section class="card frase rv" id="fraseCard"><div class="sec-row"><span class="frase-tag ${est ? 'est' : 'mot'}">${est ? 'Estoicismo' : 'Motivação'}</span>
       <button class="mini" data-act="outraFrase" aria-label="Mostrar outra frase">Outra frase</button></div>
@@ -671,7 +686,7 @@ function sheetAjustes(){
     <div class="card" style="display:flex;gap:12px;align-items:center;box-shadow:none;background:var(--surface)"><span class="avatar" style="width:48px;height:48px">${me.photoURL ? `<img src="${esc(me.photoURL)}" alt="" referrerpolicy="no-referrer">` : initials(me.displayName)}</span>
       <div class="grow" style="min-width:0"><b>${esc(me.displayName || '')}</b><div class="small muted" style="overflow-wrap:anywhere">${esc(me.email)}</div></div><button class="mini" data-act="sair">Sair</button></div>
     <div class="field"><label>Tema</label>${seg('tema', [['auto','Automático'],['light','Claro'],['dark','Escuro']], th)}</div>
-    <div class="field"><label>Frases do dia falam com você no</label>${seg('genero', [['m','Masculino'],['f','Feminino']], (S.prefs || {}).genero || '')}</div>
+    <div class="field"><label>Frases do dia falam com você no</label>${seg('genero', [['m','Masculino'],['f','Feminino']], generoAtual() || '')}</div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><div><b>Google Agenda</b><div class="small muted">${hasTok() ? 'Conectada nesta sessão' : 'Desconectada'}</div></div>${hasTok() ? '<span class="pill ok">Ativa</span>' : '<button class="mini" data-act="conectarAgenda">Conectar</button>'}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Produtos</h2><button class="mini" data-act="novoProduto">Adicionar</button></div><p class="small muted" style="margin:6px 0 0">${S.produtos.length} empreendimentos. Os da sua coordenação aparecem primeiro nas listas.</p><input class="inp" id="prodBusca" placeholder="Buscar empreendimento" style="margin-top:10px" autocomplete="off"><div class="list" id="prodLista" style="margin-top:8px">${[...S.produtos].sort((a, b) => (b.coord ? 1 : 0) - (a.coord ? 1 : 0) || a.nome.localeCompare(b.nome)).map(p => `<button class="row rowbtn" data-act="editProduto" data-id="${p.id}" data-busca="${esc(normNome(p.nome + (p.inc || '')))}"><i class="dot" style="background:${p.cor};width:12px;height:12px"></i><span class="grow"><span class="t" style="font-weight:500">${esc(p.nome)}</span><span class="s">${esc(p.inc || 'Sem incorporadora')}${p.coord ? ' · coordenação' : ''}</span></span><span class="small muted">${S.clientes.filter(c => c.produtoId === p.id).length || ''}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Corretores</h2><button class="mini" data-act="novoCorretor">Adicionar</button></div><div class="list" style="margin-top:8px">${S.corretores.map(c => `<button class="row rowbtn" data-act="editCorretor" data-id="${c.id}"><span class="avatar" style="width:28px;height:28px;font-size:11px">${esc(initials(c.nome))}</span><span class="grow t" style="font-weight:500">${esc(c.nome)}${c.id === 'eu' ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted">${S.clientes.filter(x => x.corretorId === c.id).length}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
