@@ -644,7 +644,7 @@ function sheetCliente(c){
     <div class="field"><label for="cNome">Nome</label><input class="inp" id="cNome" value="${esc(c.nome)}" required ${novo ? 'autofocus' : ''} autocomplete="off"></div>
     <div class="field"><label for="cFone">Telefone / WhatsApp</label><input class="inp" id="cFone" type="tel" inputmode="tel" value="${esc(c.fone)}" placeholder="11 9 9999-9999"></div>
     <div class="f2"><div class="field"><label for="cProd">Produto</label><select class="inp" id="cProd">${prodOptions(c.produtoId)}<option value=""${!c.produtoId ? ' selected' : ''}>Outro / sem produto</option></select></div>
-      <div class="field"><label for="cCor">Corretor</label><select class="inp" id="cCor">${S.corretores.map(b => opt(b.id, b.nome, c.corretorId)).join('')}</select></div></div>
+      <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
@@ -659,7 +659,10 @@ async function saveCliente(form){
   const id = form.dataset.id, novo = !id;
   const c = novo ? {id: uid(), criado: new Date().toISOString(), contatos: []} : S.clientes.find(x => x.id === id);
   const etapaAnt = c.etapa;
-  Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: val('cCor'), etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas')});
+  const corNome = val('cCor');
+  let cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
+  if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); }
+  Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas')});
   if (etapaAnt && etapaAnt !== c.etapa) (c.historico = c.historico || []).push({de: etapaAnt, para: c.etapa, em: new Date().toISOString()});
   if (novo) S.clientes.push(c);
   const wantCal = $('#cCal').classList.contains('on');
