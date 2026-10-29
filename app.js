@@ -48,20 +48,25 @@ const ICON = {
 const ic = (n, cls='') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||''}</svg>`;
 
 /* ================= estado ================= */
-const KEYS = ['clientes','produtos','corretores','peso','treinos','alimentacao','livros','cursos'];
+const KEYS = ['clientes','produtos','corretores','peso','treinos','alimentacao','livros','cursos','prefs'];
 const ETAPAS = ['Novo lead','Contato feito','Visita','Simulação','Proposta','Documentação','Venda','Perdido'];
 const ATIVAS = ETAPAS.slice(0, 6);
 const TEMPS = ['Quente','Morno','Frio'];
 const PCORES = ['#0A84FF','#30B0C7','#34C759','#FF9500','#AF52DE','#FF2D55','#5E5CE6','#A2845E'];
+// Todos os empreendimentos do repositório de apresentações + os que Franco trabalha fora dele
+const CATALOGO = [["Accoi","Ilhas Gregas"],["Applausi","Applausi Villaggio Engordadouro"],["Area","Brisas da Mata"],["Area","Clube Brisas Jundiaí"],["Area","Reserva da Mata"],["Auten","Auten Jundiaí"],["Auten","Auten Serrah"],["Auten","Terrace Serra do Japi"],["Benedo","Vila San Pietro"],["Carfam","Veduta Blu"],["Casa Paulista","Lago Azul"],["Cemara","Jardim Mirante"],["Cemara","Parque Petropolis"],["Cia Brasil Urbano","Yes"],["Concx","GrandClub Esportiva Jundiaí"],["Diretiva","Kaza Alamedas"],["Diretiva","Kaza Jundiaí"],["Diretiva","Residencial Alta Vista"],["Eccoinc","Colinas da Colônia"],["Emccamp","Residencial Ravello"],["FA Oliva","Allegro"],["FA Oliva","Belong"],["FA Oliva","Chronos"],["FA Oliva","Conquista Agapeama"],["FA Oliva","Contemporâneo"],["FA Oliva","Giardino"],["FA Oliva","Jardim Conquista"],["FA Oliva","Life"],["FA Oliva","Monte Bianco"],["FA Oliva","Odeon"],["FA Oliva","Paraíso"],["FA Oliva","Quinta do Pinhal"],["FA Oliva","Soneto"],["FA Oliva","Terraço"],["FA Oliva","Vila Garibaldi"],["FA Oliva","Vila Preciosa"],["FHV","Alamedas São José"],["Fibra","Reserva Bellano"],["Fibra","Villaggio Bellano"],["GPdesurb","Granville Santo Angelo"],["Grupo Lar","La Sierra"],["Lemos","Verde Vida Jundiaí"],["Lewale","Loteamento Mosaico"],["Lewale","Reserva Santa Isabel"],["Living","Vista Park"],["Lotear","TerraCaxambu"],["Lumy","Lumy Art"],["Lumy","Lumy Jundiaí"],["Luxor","Bella Vida Santo Antonio"],["Maclucer","Altissimi"],["Maclucer","Avelã"],["Maclucer","Bellacqua"],["Maclucer","Maitá"],["Maclucer","Manawa"],["Maclucer","Nexus"],["Maclucer","Singolare"],["Maclucer","Soleggiato"],["Maclucer","Vallis"],["Maclucer","Vila Itália"],["Maclucer","Vinea"],["Maclucer","Vista Bella"],["Manduca","Forest Houses"],["Martinez","Quartieri"],["MPD","Eleve"],["MPD","Línea"],["MRV","Jardim das Araucárias"],["MRV","Jardim di Florença"],["MRV","Jardins Engordadouro"],["Palas","Jardim Atenas"],["Patriani","Epic Jundiaí"],["Plano&Plano","Fatto"],["Polo","Skyvision"],["Raposo","Volpe"],["REM","Doppio Residencial"],["Santa Angela","Altos da Avenida"],["Santa Angela","Gioviale"],["Santa Angela","Jardins do Horto"],["Santa Angela","Maxx Residencial"],["Santa Angela","Portal dos Lagos"],["Santa Angela","Reserva Castanheira"],["Santa Angela","Reserva dos Lagos"],["Santa Angela","Reserva Marajoara"],["Santa Angela","Residencial Gaudí"],["Santa Angela","Residencial Vigóre"],["Santa Angela","Resort Prime"],["Santa Angela","Torres de Ozanam"],["Santa Angela","Villagio Tunis"],["Sponchiatto","Villagio Caxambu"],["Tamboré","Tamboré"],["Tebas","Authoria"],["Tebas","Design"],["Tebas","Essence"],["Tebas","Terras da Alvorada"],["Tebas","Ávora"],["Vic Engenharia","Gran Vic Lumen"],["Vic Engenharia","Gran Vic Pulse"],["VVC","Buriti"],["VVC","Portal dos Ipês"],["VVC","Portal dos Lírios"],["Zarzur","Loteamento Vem Viver"],["ZS Urbanismo","Portal dos Pássaros"],["","Bosque das Sapucaias"],["","Colinas"],["","Garden"],["","Gran Fornari"],["","La Villa Barcelona"],["","La Villa Madrid"],["","Mistral Jundiaí"],["","Oásis"],["","Reserva di Medeiros"],["","Salas e loja 9 de Julho"],["","Santorini"],["","Trend"]];
+const normNome = n => String(n||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+function catalogo(){ return CATALOGO.map(([inc, nome]) => ({id: 'c-' + normNome(nome), nome, inc, cor: PCORES[[...(inc||nome)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % PCORES.length]})); }
 const DEF = () => ({
   clientes: [],
   produtos: [
-    {id:'gvniagara', nome:'Gran Vic Niágara', cor:'#0A84FF'},
-    {id:'gvnexus', nome:'Gran Vic Nexus', cor:'#5E5CE6'},
-    {id:'brisas', nome:'Brisas do Japi', cor:'#34C759'},
-    {id:'smartape', nome:'Smart Apê Medeiros', cor:'#FF9500'},
-    {id:'villagio', nome:'Villagio dos Eucaliptos', cor:'#30B0C7'}
-  ],
+    {id:'gvniagara', nome:'Gran Vic Niágara', inc:'Vic Engenharia', cor:'#0A84FF', coord:true},
+    {id:'gvnexus', nome:'Gran Vic Nexus', inc:'Vic Engenharia', cor:'#5E5CE6', coord:true},
+    {id:'brisas', nome:'Brisas do Japi', inc:'VVC', cor:'#34C759', coord:true},
+    {id:'smartape', nome:'Smart Apê Medeiros', inc:'Grupo Zarin', cor:'#FF9500', coord:true},
+    {id:'villagio', nome:'Villagio dos Eucaliptos', inc:'Emccamp', cor:'#30B0C7', coord:true}
+  ].concat(catalogo()),
+  prefs: {catalogo: 1},
   corretores: [{id:'eu', nome:'Eu'}],
   peso: {items: [], meta: null},
   treinos: {rotinas: [], feitos: []},
@@ -118,6 +123,11 @@ async function loadUserData(){
   const d = DEF();
   snaps.forEach((s, i) => { const k = KEYS[i]; S[k] = (s && s.exists && s.data().v !== undefined) ? s.data().v : d[k]; });
   if (!S.corretores.length) S.corretores = d.corretores;
+  if (!S.prefs || !S.prefs.catalogo) {           // completa a lista com todos os empreendimentos, uma vez
+    const have = new Set(S.produtos.map(p => normNome(p.nome)));
+    d.produtos.forEach(p => { const ex = S.produtos.find(x => normNome(x.nome) === normNome(p.nome)); if (ex) { if (!ex.inc) ex.inc = p.inc; if (p.coord) ex.coord = true; } else if (!have.has(normNome(p.nome))) S.produtos.push(p); });
+    S.prefs = Object.assign({}, S.prefs, {catalogo: 1}); save('produtos', 'prefs');
+  }
   const eu = S.corretores.find(c => c.id === 'eu'); if (eu && eu.nome === 'Eu') eu.nome = (me.displayName || 'Eu').split(' ')[0];
 }
 
@@ -370,7 +380,7 @@ function viewClientes(){
   const chips = [['todos','Todos'],['quentes','Quentes'], ...S.corretores.map(c => [c.id, c.nome])];
   return head(`${ativos().length} ativos · ${counts[6]} vendas`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
   <div class="chips rv">${chips.map(([k,l]) => `<button class="chip${fc === k ? ' on' : ''}" data-act="fcor" data-v="${k}">${esc(l)}</button>`).join('')}</div>
-  <div class="chips rv"><button class="chip${fp === 'todos' ? ' on' : ''}" data-act="fprod" data-v="todos">Todos os produtos</button>${S.produtos.map(p => `<button class="chip${fp === p.id ? ' on' : ''}" data-act="fprod" data-v="${p.id}"><i class="dot" style="background:${p.cor};margin-right:6px"></i>${esc(p.nome)}</button>`).join('')}</div>
+  <div class="rv"><label class="sr" for="fProd">Produto</label><select class="inp" id="fProd" data-change="fprod"><option value="todos">Todos os produtos</option>${prodOptions(fp)}</select></div>
   <section class="card rv"><div class="sec-row"><h2>Funil</h2>${fe ? `<button class="link" data-act="fetapa" data-v="">Limpar</button>` : `<span class="small muted">Conversão <b class="num">${fmt(conv*100)}%</b></span>`}</div>
     <div class="funnel${fe ? ' filtering' : ''}">${ETAPAS.map((e, j) => `<button class="fstage${fe === e ? ' on' : ''}" data-act="fetapa" data-v="${e}" style="--j:${j}"><span class="nm">${e}</span><span class="tr"><i style="${e === 'Venda' ? 'background:var(--ok);' : e === 'Perdido' ? 'background:var(--fg2);' : ''}transform:scaleX(0)" data-bar="${counts[j] / maxC}" data-k="fn${j}"></i></span><span class="ct num" >${counts[j]}</span></button>`).join('')}</div>
   </section>
@@ -587,11 +597,12 @@ function sheetAjustes(){
       <div class="grow" style="min-width:0"><b>${esc(me.displayName || '')}</b><div class="small muted" style="overflow-wrap:anywhere">${esc(me.email)}</div></div><button class="mini" data-act="sair">Sair</button></div>
     <div class="field"><label>Tema</label>${seg('tema', [['auto','Automático'],['light','Claro'],['dark','Escuro']], th)}</div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><div><b>Google Agenda</b><div class="small muted">${hasTok() ? 'Conectada nesta sessão' : 'Desconectada'}</div></div>${hasTok() ? '<span class="pill ok">Ativa</span>' : '<button class="mini" data-act="conectarAgenda">Conectar</button>'}</div></div>
-    <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Produtos</h2><button class="mini" data-act="novoProduto">Adicionar</button></div><div class="list" style="margin-top:8px">${S.produtos.map(p => `<button class="row rowbtn" data-act="editProduto" data-id="${p.id}"><i class="dot" style="background:${p.cor};width:12px;height:12px"></i><span class="grow t" style="font-weight:500">${esc(p.nome)}</span><span class="small muted">${S.clientes.filter(c => c.produtoId === p.id).length}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
+    <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Produtos</h2><button class="mini" data-act="novoProduto">Adicionar</button></div><p class="small muted" style="margin:6px 0 0">${S.produtos.length} empreendimentos. Os da sua coordenação aparecem primeiro nas listas.</p><input class="inp" id="prodBusca" placeholder="Buscar empreendimento" style="margin-top:10px" autocomplete="off"><div class="list" id="prodLista" style="margin-top:8px">${[...S.produtos].sort((a, b) => (b.coord ? 1 : 0) - (a.coord ? 1 : 0) || a.nome.localeCompare(b.nome)).map(p => `<button class="row rowbtn" data-act="editProduto" data-id="${p.id}" data-busca="${esc(normNome(p.nome + (p.inc || '')))}"><i class="dot" style="background:${p.cor};width:12px;height:12px"></i><span class="grow"><span class="t" style="font-weight:500">${esc(p.nome)}</span><span class="s">${esc(p.inc || 'Sem incorporadora')}${p.coord ? ' · coordenação' : ''}</span></span><span class="small muted">${S.clientes.filter(c => c.produtoId === p.id).length || ''}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Corretores</h2><button class="mini" data-act="novoCorretor">Adicionar</button></div><div class="list" style="margin-top:8px">${S.corretores.map(c => `<button class="row rowbtn" data-act="editCorretor" data-id="${c.id}"><span class="avatar" style="width:28px;height:28px;font-size:11px">${esc(initials(c.nome))}</span><span class="grow t" style="font-weight:500">${esc(c.nome)}${c.id === 'eu' ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted">${S.clientes.filter(x => x.corretorId === c.id).length}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
     <button class="btn sec wide" data-act="metas">Metas de peso, macros e leitura</button>
     <div class="sec-row"><span class="sync ${syncState}" id="syncInd"><i></i><span>${syncLabel()}</span></span><button class="link small" data-act="backup">Copiar backup</button></div>
   </div>`);
+  const b = $('#prodBusca'); if (b) b.addEventListener('input', () => { const q = normNome(b.value); $('#prodLista').querySelectorAll('[data-busca]').forEach(r => r.hidden = q && !r.dataset.busca.includes(q)); });
 }
 
 /* ================= sheets ================= */
@@ -609,6 +620,14 @@ function closeSheet(){
   setTimeout(() => { w.hidden = true; $('#sheetBody').innerHTML = ''; }, RM.matches ? 0 : 420);
 }
 addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
+function prodOptions(cur, byName){
+  const v = p => byName ? p.nome : p.id;
+  const grp = {}; S.produtos.filter(p => !p.coord).forEach(p => { const k = p.inc || 'Outros'; (grp[k] = grp[k] || []).push(p); });
+  const coord = S.produtos.filter(p => p.coord);
+  const keys = Object.keys(grp).sort((a, b) => a === 'Outros' ? 1 : b === 'Outros' ? -1 : a.localeCompare(b));
+  return (coord.length ? `<optgroup label="Minha coordenação">${coord.map(p => opt(v(p), p.nome, cur)).join('')}</optgroup>` : '')
+    + keys.map(k => `<optgroup label="${esc(k)}">${grp[k].sort((a, b) => a.nome.localeCompare(b.nome)).map(p => opt(v(p), p.nome, cur)).join('')}</optgroup>`).join('');
+}
 const opt = (v, l, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(l)}</option>`;
 const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
 const num = id => { const v = parseFloat(val(id).replace(',', '.')); return isFinite(v) ? v : 0; };
@@ -616,7 +635,7 @@ const confirmBox = (msg, act, id) => `<div class="confirm" id="cfm" hidden><b>${
 
 function sheetCliente(c){
   const novo = !c; const t = today();
-  c = c || {nome:'', fone:'', produtoId: ui.clientesFiltroProd !== 'todos' ? ui.clientesFiltroProd : (S.produtos[0] || {}).id, corretorId: !['todos','quentes'].includes(ui.clientesFiltroCor) ? ui.clientesFiltroCor : 'eu', etapa:'Novo lead', temp:'Quente', lembrete: t + 'T23:59', notas:'', contatos:[]};
+  c = c || {nome:'', fone:'', produtoId: ui.clientesFiltroProd !== 'todos' ? ui.clientesFiltroProd : '', corretorId: !['todos','quentes'].includes(ui.clientesFiltroCor) ? ui.clientesFiltroCor : 'eu', etapa:'Novo lead', temp:'Quente', lembrete: t + 'T23:59', notas:'', contatos:[]};
   const idx = ETAPAS.indexOf(c.etapa);
   const fone = (c.fone || '').replace(/\D/g, ''), wa = fone ? 'https://wa.me/' + (fone.length <= 11 ? '55' + fone : fone) : '';
   openSheet(novo ? 'Novo cliente' : c.nome, `<form class="form" data-form="cliente" data-id="${c.id || ''}">
@@ -624,7 +643,7 @@ function sheetCliente(c){
       ${idx >= 0 && idx < 6 ? `<button type="button" class="btn sec wide" data-act="avancar" data-id="${c.id}">Avançar para ${ETAPAS[idx + 1]} ${ic('chev','s')}</button>` : ''}` : ''}
     <div class="field"><label for="cNome">Nome</label><input class="inp" id="cNome" value="${esc(c.nome)}" required ${novo ? 'autofocus' : ''} autocomplete="off"></div>
     <div class="field"><label for="cFone">Telefone / WhatsApp</label><input class="inp" id="cFone" type="tel" inputmode="tel" value="${esc(c.fone)}" placeholder="11 9 9999-9999"></div>
-    <div class="f2"><div class="field"><label for="cProd">Produto</label><select class="inp" id="cProd">${S.produtos.map(p => opt(p.id, p.nome, c.produtoId)).join('')}<option value="">Outro / sem produto</option></select></div>
+    <div class="f2"><div class="field"><label for="cProd">Produto</label><select class="inp" id="cProd">${prodOptions(c.produtoId)}<option value=""${!c.produtoId ? ' selected' : ''}>Outro / sem produto</option></select></div>
       <div class="field"><label for="cCor">Corretor</label><select class="inp" id="cCor">${S.corretores.map(b => opt(b.id, b.nome, c.corretorId)).join('')}</select></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
@@ -667,7 +686,7 @@ async function sheetAtend(a){
   openSheet(novo ? 'Novo atendimento' : 'Editar atendimento', `<form class="form" data-form="atend" data-id="${a.id || ''}">
     <div class="field"><label for="aTit">Tipo</label><select class="inp" id="aTit">${['Atendimento','Visita ao decorado','Visita ao imóvel','Assinatura','Reunião','Plantão'].map(x => opt(x, x, a.titulo)).join('')}</select></div>
     <div class="field"><label for="aCli">Cliente</label><input class="inp" id="aCli" list="cliList" value="${esc(a.cliente)}" placeholder="Nome do cliente" autocomplete="off"><datalist id="cliList">${ativos().map(c => `<option value="${esc(c.nome)}"></option>`).join('')}</datalist></div>
-    <div class="field"><label for="aProd">Produto</label><select class="inp" id="aProd"><option value="">—</option>${S.produtos.map(p => opt(p.nome, p.nome, a.produto)).join('')}</select></div>
+    <div class="field"><label for="aProd">Produto</label><select class="inp" id="aProd"><option value="">—</option>${prodOptions(a.produto, true)}</select></div>
     <div class="f3"><div class="field"><label for="aDia">Dia</label><input class="inp" id="aDia" type="date" value="${a.inicio.slice(0,10)}" required></div>
       <div class="field"><label for="aHora">Hora</label><input class="inp" id="aHora" type="time" value="${a.inicio.slice(11,16)}" required></div>
       <div class="field"><label for="aDur">Duração</label><select class="inp" id="aDur">${[[30,'30 min'],[60,'1 h'],[90,'1h30'],[120,'2 h'],[180,'3 h']].map(([v,l]) => opt(String(v), l, String(a.duracao))).join('')}</select></div></div>
@@ -796,6 +815,8 @@ function sheetSimples(tipo, it){
   it = it || {nome:'', cor: PCORES[S.produtos.length % PCORES.length]};
   openSheet(novo ? (isP ? 'Novo produto' : 'Novo corretor') : (isP ? 'Editar produto' : 'Editar corretor'), `<form class="form" data-form="${tipo}" data-id="${it.id || ''}">
     <div class="field"><label for="sN">Nome</label><input class="inp" id="sN" value="${esc(it.nome)}" required autofocus></div>
+    ${isP ? `<div class="field"><label for="sInc">Incorporadora</label><input class="inp" id="sInc" value="${esc(it.inc || '')}"></div>
+    <div class="switch"><div><b>Da minha coordenação</b><div class="small muted">Aparece primeiro nas listas</div></div><button type="button" class="sw${it.coord ? ' on' : ''}" id="sCoord" data-act="sw" role="switch" aria-checked="${!!it.coord}"></button></div>` : ''}
     ${isP ? `<div class="field"><label>Cor</label><div class="toggles" id="sCor">${PCORES.map(c => `<button type="button" class="${c === it.cor ? 'on' : ''}" data-act="pickCor" data-v="${c}" style="background:${c};outline:${c === it.cor ? '3px solid var(--fg)' : 'none'};outline-offset:2px" aria-label="Cor"></button>`).join('')}</div></div>` : ''}
     <button class="btn pri wide">Salvar</button>
     ${!novo && it.id !== 'eu' ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir</button>${confirmBox('Excluir? Os clientes ligados continuam salvos.', isP ? 'delProduto' : 'delCorretor', it.id)}` : ''}</form>`);
@@ -976,7 +997,7 @@ const FORMS = {
   },
   produto: f => {
     const id = f.dataset.id, p = id ? find(S.produtos, id) : {id: uid()};
-    p.nome = val('sN'); const on = document.querySelector('#sCor .on'); p.cor = on ? on.dataset.v : PCORES[0];
+    p.nome = val('sN'); p.inc = val('sInc'); p.coord = $('#sCoord').classList.contains('on'); const on = document.querySelector('#sCor .on'); p.cor = on ? on.dataset.v : PCORES[0];
     if (!id) S.produtos.push(p); save('produtos'); sheetAjustes(); render(false);
   },
   corretor: f => {
@@ -989,6 +1010,10 @@ document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = ACT[el.dataset.act]; if (!fn) return;
   e.preventDefault(); fn(el, e);
+});
+document.addEventListener('change', e => {
+  const el = e.target.closest('[data-change]'); if (!el) return;
+  if (el.dataset.change === 'fprod') { ui.clientesFiltroProd = el.value; render(false); }
 });
 document.addEventListener('submit', e => {
   const f = e.target.closest('[data-form]'); if (!f) return;
