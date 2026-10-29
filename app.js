@@ -302,7 +302,7 @@ function pesoDelta(days){
 const rotinasDe = dia => S.treinos.rotinas.filter(r => (r.dias||[]).includes(parseD(dia).getDay()));
 const treinoFeito = dia => S.treinos.feitos.some(f => f.data === dia);
 const refeicoesDe = dia => S.alimentacao.refeicoes.filter(r => r.data === dia);
-const somaDia = dia => refeicoesDe(dia).reduce((a, r) => ({p:a.p+(+r.p||0), c:a.c+(+r.c||0), g:a.g+(+r.g||0), k:a.k+kcalOf(r)}), {p:0,c:0,g:0,k:0});
+const somaDia = dia => refeicoesDe(dia).reduce((a, r) => ({p:a.p+(+r.p||0), c:a.c+(+r.c||0), g:a.g+(+r.g||0), k:a.k+mealKcal(r)}), {p:0,c:0,g:0,k:0});
 const metaKcal = () => S.alimentacao.metas ? (S.alimentacao.metas.kcal || kcalOf(S.alimentacao.metas)) : 0;
 const livrosAtivos = () => S.livros.items.filter(l => !l.concluidoEm);
 const lidosAno = () => S.livros.items.filter(l => l.concluidoEm && l.concluidoEm.slice(0,4) === today().slice(0,4)).length;
@@ -397,6 +397,51 @@ function cardFrase(){
     ${g ? '' : `<div class="frase-gen"><span class="small muted">Como as frases devem falar com você?</span><div class="btnrow"><button class="mini" data-act="genero" data-v="m">No masculino</button><button class="mini" data-act="genero" data-v="f">No feminino</button></div></div>`}
   </section>`;
 }
+
+
+/* ---------- tabela de alimentos: valores aproximados por 100 g (ou 100 ml), base TACO e rótulos comuns ----------
+   [nome, kcal, proteína, carbo, gordura, porção, gramas da porção] */
+const ALIMENTOS = [
+  ['Arroz branco cozido',128,2.5,28.1,0.2,'escumadeira',90],['Arroz integral cozido',124,2.6,25.8,1.0,'escumadeira',90],
+  ['Feijão carioca cozido',76,4.8,13.6,0.5,'concha',100],['Feijão preto cozido',77,4.5,14.0,0.5,'concha',100],
+  ['Feijoada',117,8.7,11.6,6.5,'concha',150],['Macarrão cozido',158,5.8,30.9,0.9,'pegador',110],
+  ['Batata inglesa cozida',52,1.2,11.9,0.1,'unidade média',140],['Batata doce cozida',77,0.6,18.4,0.1,'unidade média',150],
+  ['Batata frita',267,5.0,35.6,13.1,'porção pequena',100],['Mandioca cozida',125,0.6,30.1,0.3,'pedaço',100],
+  ['Cuscuz de milho cozido',113,2.2,25.3,0.7,'fatia',150],['Milho verde',98,3.2,17.1,2.4,'colher de sopa',25],
+  ['Farofa / farinha de mandioca',365,1.2,89.2,0.3,'colher de sopa',15],['Pão francês',300,8.0,58.6,3.1,'unidade',50],
+  ['Pão de forma tradicional',268,8.0,50.0,3.5,'fatia',25],['Pão de forma integral',253,9.4,49.9,3.7,'fatia',25],
+  ['Pão de queijo',363,5.1,34.2,24.6,'unidade',25],['Goma de tapioca',240,0.2,59.6,0.1,'tapioca média',60],
+  ['Aveia em flocos',394,13.9,66.6,8.5,'colher de sopa',15],['Granola',420,10.0,68.0,12.0,'colher de sopa',15],
+  ['Biscoito cream cracker',432,10.1,68.7,14.4,'unidade',6],['Pizza de muçarela',266,11.0,33.0,10.0,'fatia',110],
+  ['Peito de frango grelhado',159,32.0,0,2.5,'filé',120],['Coxa de frango assada',215,28.5,0,11.0,'unidade',90],
+  ['Patinho grelhado',219,35.9,0,7.3,'bife',100],['Alcatra grelhada',241,31.9,0,11.6,'bife',100],
+  ['Contrafilé grelhado',278,32.4,0,15.5,'bife',100],['Picanha grelhada',289,26.4,0,19.6,'fatia',100],
+  ['Carne moída refogada',212,26.7,0,10.9,'porção',100],['Lombo de porco assado',210,35.7,0,6.4,'fatia',100],
+  ['Linguiça toscana grelhada',296,23.0,0,22.0,'gomo',60],['Tilápia grelhada',128,26.0,0,2.7,'filé',120],
+  ['Salmão grelhado',229,26.0,0,14.0,'filé',120],['Atum em lata (água)',116,26.0,0,1.0,'lata drenada',120],
+  ['Hambúrguer bovino grelhado',250,20.0,2.0,18.0,'unidade',90],
+  ['Ovo cozido',146,13.3,0.6,9.5,'unidade',50],['Ovo frito',240,15.6,1.2,18.6,'unidade',50],['Clara de ovo',52,11.0,0.7,0.2,'unidade',33],
+  ['Whey protein',380,75.0,8.0,5.0,'scoop',30],['Queijo muçarela',330,22.6,3.0,25.2,'fatia',20],
+  ['Queijo minas frescal',264,17.4,3.2,20.2,'fatia',30],['Queijo cottage',98,11.0,3.4,4.3,'colher de sopa',30],
+  ['Requeijão',257,9.6,2.4,23.4,'colher de sopa',30],['Presunto',94,14.3,2.1,2.7,'fatia',15],['Peito de peru',105,19.0,2.0,2.4,'fatia',15],
+  ['Iogurte natural integral',51,4.1,1.9,3.0,'pote',170],['Iogurte grego',125,5.5,13.0,6.0,'pote',100],
+  ['Leite integral',61,3.2,4.6,3.3,'copo (200 ml)',200],['Leite desnatado',35,3.4,4.9,0.2,'copo (200 ml)',200],
+  ['Azeite de oliva',884,0,0,100,'colher de sopa',13],['Manteiga',726,0.4,0.1,82.4,'colher de chá',5],
+  ['Pasta de amendoim',588,25.0,20.0,50.0,'colher de sopa',15],['Amendoim torrado',606,22.5,18.7,54.0,'punhado',30],
+  ['Castanha-do-pará',643,14.5,15.1,63.5,'unidade',4],['Castanha de caju',570,18.5,29.1,46.3,'punhado',20],
+  ['Abacate',96,1.2,6.0,8.4,'colher de sopa',30],['Chocolate ao leite',540,7.2,59.6,30.3,'barra pequena',25],
+  ['Açúcar',387,0,99.5,0,'colher de chá',5],['Mel',309,0,84.0,0,'colher de sopa',20],
+  ['Banana prata',98,1.3,26.0,0.1,'unidade',70],['Maçã',56,0.3,15.2,0,'unidade',130],['Mamão papaia',40,0.5,10.4,0.1,'meia unidade',150],
+  ['Laranja',37,1.0,8.9,0.1,'unidade',150],['Morango',30,0.9,6.8,0.3,'xícara',140],['Uva',53,0.7,13.6,0.2,'cacho pequeno',100],
+  ['Abacaxi',48,0.9,12.3,0.1,'fatia',100],['Manga',64,0.4,16.7,0.3,'unidade',200],['Melancia',33,0.9,8.1,0,'fatia',200],
+  ['Açaí (polpa sem açúcar)',58,0.8,6.2,3.9,'pacote',100],
+  ['Alface',11,1.3,1.7,0.2,'prato',50],['Tomate',15,1.1,3.1,0.2,'unidade',100],['Brócolis cozido',25,2.1,4.4,0.5,'porção',60],
+  ['Cenoura crua',34,1.3,7.7,0.2,'porção',50],['Abobrinha refogada',25,1.1,4.0,0.6,'porção',80],
+  ['Café sem açúcar',2,0.2,0.3,0,'xícara',50],['Suco de laranja natural',33,0.7,7.6,0.1,'copo (250 ml)',250],
+  ['Refrigerante comum',41,0,10.4,0,'lata (350 ml)',350],['Cerveja pilsen',41,0.6,3.3,0,'lata (350 ml)',350]
+];
+const alimentosTodos = () => ALIMENTOS.map(a => ({nome:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6]})).concat((S.alimentacao.meus || []).map(m => Object.assign({meu:true}, m)));
+const mealKcal = r => r.kcal != null ? r.kcal : kcalOf(r);
 
 /* ================= HOJE ================= */
 function viewHoje(){
@@ -640,7 +685,7 @@ function corpoAlim(){
 }
 function mealsList(t){
   const r = refeicoesDe(t);
-  return `<section class="card rv"><h2>Refeições de hoje</h2>${r.length ? `<div class="list">${r.map(x => `<div class="row" data-flip="m${x.id}"><div class="grow"><div class="t">${esc(x.nome)}</div><div class="s num">P ${fmt(x.p)} · C ${fmt(x.c)} · G ${fmt(x.g)}</div></div><b class="num">${fmt(kcalOf(x))}</b><span class="small muted">kcal</span><button class="round ghost" data-act="delRefeicao" data-id="${x.id}" aria-label="Apagar refeição">${ic('trash','s')}</button></div>`).join('')}</div>` : empty('food', 'Nenhuma refeição hoje', 'Registre o que comeu com proteína, carboidrato e gordura.', `<button class="btn pri" data-act="novaRefeicao">${ic('plus','s')}Refeição</button>`)}</section>`;
+  return `<section class="card rv"><h2>Refeições de hoje</h2>${r.length ? `<div class="list">${r.map(x => `<div class="row" data-flip="m${x.id}"><div class="grow"><div class="t">${esc(x.nome)}</div><div class="s num">${x.itens && x.itens.length ? esc(x.itens.map(i => i.nome).join(', ')) + '<br>' : ''}P ${fmt(x.p)} · C ${fmt(x.c)} · G ${fmt(x.g)}</div></div><b class="num">${fmt(mealKcal(x))}</b><span class="small muted">kcal</span><button class="round ghost" data-act="delRefeicao" data-id="${x.id}" aria-label="Apagar refeição">${ic('trash','s')}</button></div>`).join('')}</div>` : empty('food', 'Nenhuma refeição hoje', 'Busque os alimentos e a quantidade. As calorias e os macros são calculados sozinhos.', `<button class="btn pri" data-act="novaRefeicao">${ic('plus','s')}Refeição</button>`)}</section>`;
 }
 
 /* ================= ESTUDOS ================= */
@@ -858,19 +903,53 @@ function sheetRotina(r){
     ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir rotina</button>${confirmBox('Excluir esta rotina?', 'delRotina', r.id)}` : ''}
   </form>`);
 }
+let mealItens = [];
+const itemVals = it => { const gr = it.un === 'g' ? it.q : it.q * it.pg; const f = gr / 100; return {k: it.k * f, p: it.p * f, c: it.c * f, g: it.g * f, gr}; };
 function sheetRefeicao(){
+  mealItens = [];
+  const h = new Date().getHours(), sug = h < 10 ? 'Café da manhã' : h < 15 ? 'Almoço' : h < 18 ? 'Lanche' : h < 22 ? 'Jantar' : 'Ceia';
   const rec = []; const seen = new Set();
-  [...S.alimentacao.refeicoes].reverse().forEach(m => { if (!seen.has(m.nome) && rec.length < 8) { seen.add(m.nome); rec.push(m); } });
+  [...S.alimentacao.refeicoes].reverse().forEach(m => { if (m.itens && m.itens.length && !seen.has(m.nome + m.itens.length) && rec.length < 6) { seen.add(m.nome + m.itens.length); rec.push(m); } });
   openSheet('Nova refeição', `<form class="form" data-form="refeicao">
-    ${rec.length ? `<div class="field"><label>Repetir uma recente</label><div class="chips" style="flex-wrap:wrap">${rec.map((m, i) => `<button type="button" class="chip" data-act="repMeal" data-v='${esc(JSON.stringify({n:m.nome, p:m.p, c:m.c, g:m.g}))}'>${esc(m.nome)}</button>`).join('')}</div></div>` : ''}
-    <div class="field"><label for="mNome">Refeição</label><input class="inp" id="mNome" placeholder="Almoço · frango, arroz e salada" required></div>
-    <div class="f3"><div class="field"><label for="mP">Proteína (g)</label><input class="inp num" id="mP" type="number" inputmode="decimal" min="0" step="1" value="0"></div>
-      <div class="field"><label for="mC">Carbo (g)</label><input class="inp num" id="mC" type="number" inputmode="decimal" min="0" step="1" value="0"></div>
-      <div class="field"><label for="mG">Gordura (g)</label><input class="inp num" id="mG" type="number" inputmode="decimal" min="0" step="1" value="0"></div></div>
-    <div class="sec-row"><span class="muted">Calorias</span><b class="num" id="mK" style="font-size:22px">0 kcal</b></div>
-    <button class="btn pri wide">Adicionar</button></form>`);
-  const upd = () => { const k = kcalOf({p:num('mP'), c:num('mC'), g:num('mG')}); $('#mK').textContent = fmt(k) + ' kcal'; };
-  ['mP','mC','mG'].forEach(i => $('#' + i).addEventListener('input', upd));
+    <div class="field"><label for="mNome">Refeição</label><input class="inp" id="mNome" list="mNomes" value="${sug}" required autocomplete="off"><datalist id="mNomes">${['Café da manhã','Lanche da manhã','Almoço','Lanche','Pré-treino','Pós-treino','Jantar','Ceia'].map(n => `<option value="${n}"></option>`).join('')}</datalist></div>
+    ${rec.length ? `<div class="field"><label>Repetir uma recente</label><div class="chips" style="flex-wrap:wrap">${rec.map((m, i) => `<button type="button" class="chip" data-act="repMeal" data-v="${m.id}">${esc(m.nome)} · ${fmt(mealKcal(m))} kcal</button>`).join('')}</div></div>` : ''}
+    <div class="field"><label for="mBusca">Adicionar alimento</label><input class="inp" id="mBusca" placeholder="Ex.: arroz, frango, banana" autocomplete="off"><div class="list" id="mRes"></div></div>
+    <div class="card" style="box-shadow:none;padding:12px 14px"><div class="list" id="mItens"></div></div>
+    <div class="card" style="box-shadow:none;display:grid;gap:6px;background:var(--accent-soft)" id="mTot"></div>
+    <button type="button" class="link small" data-act="mealManual" style="justify-self:start">Não achou? Cadastrar alimento</button>
+    <div id="mManual" hidden class="card" style="box-shadow:none;display:grid;gap:10px">
+      <div class="field"><label for="xN">Nome do alimento</label><input class="inp" id="xN" placeholder="Ex.: Marmita do restaurante"></div>
+      <div class="f2"><div class="field"><label for="xPn">Porção</label><input class="inp" id="xPn" value="porção"></div><div class="field"><label for="xK">Calorias da porção</label><input class="inp num" id="xK" type="number" inputmode="decimal" min="0" placeholder="kcal"></div></div>
+      <div class="f3"><div class="field"><label for="xP">Proteína (g)</label><input class="inp num" id="xP" type="number" inputmode="decimal" min="0" value="0"></div><div class="field"><label for="xC">Carbo (g)</label><input class="inp num" id="xC" type="number" inputmode="decimal" min="0" value="0"></div><div class="field"><label for="xG">Gordura (g)</label><input class="inp num" id="xG" type="number" inputmode="decimal" min="0" value="0"></div></div>
+      <p class="small muted" style="margin:0">Use o rótulo da embalagem. Se deixar as calorias em branco, calculo pelos macros. O alimento fica salvo para as próximas vezes.</p>
+      <button type="button" class="btn sec" data-act="mealSalvarMeu">Salvar e adicionar</button>
+    </div>
+    <button class="btn pri wide" id="mSave">Adicionar refeição</button></form>`);
+  const busca = $('#mBusca');
+  busca.addEventListener('input', () => {
+    const q = normNome(busca.value);
+    const res = q.length < 2 ? [] : alimentosTodos().filter(a => normNome(a.nome).includes(q)).slice(0, 7);
+    $('#mRes').innerHTML = res.map((a, i) => `<button type="button" class="row rowbtn" data-act="mealAdd" data-v="${esc(a.nome)}"><span class="grow"><span class="t" style="font-weight:500">${esc(a.nome)}${a.meu ? ' <span class="pill">meu</span>' : ''}</span><span class="s">1 ${esc(a.pn)} · ${fmt(a.k * a.pg / 100)} kcal</span></span>${ic('plus','s')}</button>`).join('')
+      || (q.length >= 2 ? '<p class="small muted" style="margin:6px 0 0">Nada encontrado. Cadastre o alimento abaixo.</p>' : '');
+  });
+  drawMeal();
+}
+function drawMeal(){
+  const box = $('#mItens'); if (!box) return;
+  box.innerHTML = mealItens.length ? mealItens.map((it, i) => { const v = itemVals(it);
+    return `<div class="row"><div class="grow"><div class="t" style="font-weight:500">${esc(it.nome)}</div><div class="s num">${fmt(v.k)} kcal · P ${fmt(v.p)} · C ${fmt(v.c)} · G ${fmt(v.g)}</div>
+      <div class="btnrow" style="margin-top:6px;gap:6px;flex-wrap:nowrap"><input class="inp num" style="height:36px;width:76px;flex:none" type="number" inputmode="decimal" min="0" step="${it.un === 'g' ? 10 : 0.5}" value="${it.q}" data-mq="${i}" aria-label="Quantidade">
+      <select class="inp" style="height:36px;flex:1;min-width:0" data-mu="${i}" aria-label="Unidade"><option value="p"${it.un !== 'g' ? ' selected' : ''}>${esc(it.pn)} (${fmt(it.pg)} g)</option><option value="g"${it.un === 'g' ? ' selected' : ''}>gramas</option></select></div></div>
+      <button type="button" class="round ghost" data-act="mealDel" data-v="${i}" aria-label="Remover">${ic('x','s')}</button></div>`; }).join('')
+    : '<p class="small muted" style="margin:0">Nenhum alimento ainda. Busque acima.</p>';
+  box.querySelectorAll('[data-mq]').forEach(el => el.addEventListener('input', () => { mealItens[+el.dataset.mq].q = parseFloat(el.value.replace(',', '.')) || 0; drawTot(); el.closest('.row').querySelector('.s').textContent = (v => `${fmt(v.k)} kcal · P ${fmt(v.p)} · C ${fmt(v.c)} · G ${fmt(v.g)}`)(itemVals(mealItens[+el.dataset.mq])); }));
+  box.querySelectorAll('[data-mu]').forEach(el => el.addEventListener('change', () => { const it = mealItens[+el.dataset.mu]; const gr = itemVals(it).gr; it.un = el.value; it.q = it.un === 'g' ? Math.round(gr) : +(gr / it.pg).toFixed(1); drawMeal(); }));
+  drawTot();
+}
+function mealTot(){ return mealItens.reduce((a, it) => { const v = itemVals(it); return {k:a.k+v.k, p:a.p+v.p, c:a.c+v.c, g:a.g+v.g}; }, {k:0,p:0,c:0,g:0}); }
+function drawTot(){
+  const t = mealTot(), el = $('#mTot'); if (!el) return;
+  el.innerHTML = `<div class="sec-row"><span class="muted">Total da refeição</span><b class="num" style="font-size:22px">${fmt(t.k)} kcal</b></div><div class="sec-row small num"><span>Proteína <b>${fmt(t.p)} g</b></span><span>Carbo <b>${fmt(t.c)} g</b></span><span>Gordura <b>${fmt(t.g)} g</b></span></div>`;
 }
 const DIVISOES = {equilibrada: ['Equilibrada', 30, 40, 30], proteica: ['Mais proteína', 40, 35, 25], lowcarb: ['Low carb', 40, 20, 40]};
 function sheetMetas(){
@@ -1018,7 +1097,18 @@ const ACT = {
   delRotina: el => { S.treinos.rotinas = S.treinos.rotinas.filter(r => r.id !== el.dataset.id); save('treinos'); closeSheet(); render(false); toast('Rotina excluída'); },
   treinoFeito: () => toggleTreino(), treinoAvulso: () => toggleTreino(),
   novaRefeicao: () => sheetRefeicao(),
-  repMeal: el => { const m = JSON.parse(el.dataset.v); $('#mNome').value = m.n; $('#mP').value = m.p; $('#mC').value = m.c; $('#mG').value = m.g; $('#mP').dispatchEvent(new Event('input')); },
+  repMeal: el => { const m = find(S.alimentacao.refeicoes, el.dataset.v); if (!m) return; $('#mNome').value = m.nome; mealItens = m.itens.map(i => Object.assign({}, i)); drawMeal(); },
+  mealAdd: el => { const a = alimentosTodos().find(x => x.nome === el.dataset.v); if (!a) return; mealItens.push({nome:a.nome, k:a.k, p:a.p, c:a.c, g:a.g, pn:a.pn, pg:a.pg, q:1, un:'p'}); $('#mBusca').value = ''; $('#mRes').innerHTML = ''; drawMeal(); const last = $('#mItens').lastElementChild; if (last && !RM.matches) last.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'none'}], {duration: 320}); },
+  mealDel: el => { mealItens.splice(+el.dataset.v, 1); drawMeal(); },
+  mealManual: () => { const b = $('#mManual'); b.hidden = !b.hidden; if (!b.hidden) $('#xN').focus(); },
+  mealSalvarMeu: () => {
+    const nome = val('xN'); if (!nome) return toast('Dê um nome ao alimento.', true);
+    const p = num('xP'), c = num('xC'), g = num('xG'), k = num('xK') || kcalOf({p, c, g});
+    const meu = {nome, k, p, c, g, pn: val('xPn') || 'porção', pg: 100};
+    S.alimentacao.meus = (S.alimentacao.meus || []).filter(m => normNome(m.nome) !== normNome(nome)).concat([meu]);
+    save('alimentacao'); mealItens.push(Object.assign({q:1, un:'p'}, meu));
+    ['xN','xK'].forEach(i => $('#' + i).value = ''); ['xP','xC','xG'].forEach(i => $('#' + i).value = 0); $('#mManual').hidden = true; drawMeal(); toast(nome + ' salvo nos seus alimentos');
+  },
   delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
   outraFrase: () => {
@@ -1090,9 +1180,11 @@ const FORMS = {
     if (!id) S.treinos.rotinas.push(r); save('treinos'); closeSheet(); render(false); toast('Rotina salva');
   },
   refeicao: () => {
-    S.alimentacao.refeicoes.push({id: uid(), data: today(), nome: val('mNome'), p: num('mP'), c: num('mC'), g: num('mG')});
+    if (!mealItens.length) return toast('Adicione pelo menos um alimento.', true);
+    const t = mealTot(), r1 = x => Math.round(x * 10) / 10;
+    S.alimentacao.refeicoes.push({id: uid(), data: today(), nome: val('mNome'), kcal: Math.round(t.k), p: r1(t.p), c: r1(t.c), g: r1(t.g), itens: mealItens.map(i => Object.assign({}, i))});
     if (S.alimentacao.refeicoes.length > 1500) S.alimentacao.refeicoes = S.alimentacao.refeicoes.slice(-1500);
-    save('alimentacao'); closeSheet(); render(false); toast('Refeição adicionada');
+    save('alimentacao'); closeSheet(); render(false); toast(`Refeição adicionada · ${fmt(t.k)} kcal`);
   },
   metas: () => {
     const k = num('gKcal'), pp = num('gPp'), pc = num('gPc'), pg = num('gPg');

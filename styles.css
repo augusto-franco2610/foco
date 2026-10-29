@@ -306,3 +306,4 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .frase-txt cite{font-style:normal;font-size:14px;color:var(--fg2);font-weight:500}
 .frase-txt cite::before{content:"— "}
 .frase-gen{display:grid;gap:8px;padding-top:10px;border-top:1px solid var(--line)}
+.link{color:var(--accent);font-weight:500}
