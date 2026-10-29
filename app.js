@@ -343,6 +343,8 @@ function generoPorNome(nome){
   return null;
 }
 const generoAtual = () => (S.prefs && S.prefs.genero) || generoPorNome(me && me.displayName);
+const antec = () => { const p = S.prefs || {}; return p.antec != null ? +p.antec : 15; };
+const lembreteAuto = () => !(S.prefs && S.prefs.lembreteAuto === false);
 const generoTxt = (t, g) => t.replace(/\{([^|}]*)\|([^}]*)\}/g, (_, m, f) => g === 'f' ? f : m);
 function fraseDoMomento(){
   const g = generoAtual();
@@ -798,6 +800,11 @@ function sheetAjustes(){
     <div class="card" style="display:flex;gap:12px;align-items:center;box-shadow:none;background:var(--surface)"><span class="avatar" style="width:48px;height:48px">${me.photoURL ? `<img src="${esc(me.photoURL)}" alt="" referrerpolicy="no-referrer">` : initials(me.displayName)}</span>
       <div class="grow" style="min-width:0"><b>${esc(me.displayName || '')}</b><div class="small muted" style="overflow-wrap:anywhere">${esc(me.email)}</div></div><button class="mini" data-act="sair">Sair</button></div>
     <div class="field"><label>Tema</label>${seg('tema', [['auto','Automático'],['light','Claro'],['dark','Escuro']], th)}</div>
+    <div class="card" style="box-shadow:none;display:grid;gap:12px" id="cardNotif"><b>Notificações</b>
+      <div class="switch"><div><b style="font-weight:500">Lembretes pela Google Agenda</b><div class="small muted">Retornos, visitas, compromissos e tarefas com horário entram na agenda já com aviso</div></div><button type="button" class="sw${lembreteAuto() ? ' on' : ''}" data-act="lembreteAuto" role="switch" aria-checked="${lembreteAuto()}"></button></div>
+      <div class="field"><label>Avisar com antecedência de</label>${seg('antec', [['0','Na hora'],['15','15 min'],['30','30 min'],['60','1 h']], String(antec()))}</div>
+      <div id="pushBox"></div>
+    </div>
     <div class="field"><label>Frases do dia falam com você no</label>${seg('genero', [['m','Masculino'],['f','Feminino']], generoAtual() || '')}</div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><div><b>Google Agenda</b><div class="small muted">${hasTok() ? 'Conectada nesta sessão' : 'Desconectada'}</div></div>${hasTok() ? '<span class="pill ok">Ativa</span>' : '<button class="mini" data-act="conectarAgenda">Conectar</button>'}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Produtos</h2><button class="mini" data-act="novoProduto">Adicionar</button></div><p class="small muted" style="margin:6px 0 0">${S.produtos.length} empreendimentos. Os da sua coordenação aparecem primeiro nas listas.</p><input class="inp" id="prodBusca" placeholder="Buscar empreendimento" style="margin-top:10px" autocomplete="off"><div class="list" id="prodLista" style="margin-top:8px">${[...S.produtos].sort((a, b) => (b.coord ? 1 : 0) - (a.coord ? 1 : 0) || a.nome.localeCompare(b.nome)).map(p => `<button class="row rowbtn" data-act="editProduto" data-id="${p.id}" data-busca="${esc(normNome(p.nome + (p.inc || '')))}"><i class="dot" style="background:${p.cor};width:12px;height:12px"></i><span class="grow"><span class="t" style="font-weight:500">${esc(p.nome)}</span><span class="s">${esc(p.inc || 'Sem incorporadora')}${p.coord ? ' · coordenação' : ''}</span></span><span class="small muted">${S.clientes.filter(c => c.produtoId === p.id).length || ''}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
@@ -852,7 +859,7 @@ function sheetCliente(c){
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
     <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
-    <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div><button type="button" class="sw${c.calEventId ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${!!c.calEventId}"></button></div>
+    <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div>${(on => `<button type="button" class="sw${on ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${on}"></button>`)(c.id ? !!c.calEventId : lembreteAuto())}</div>
     ${blocoVisita(c, novo)}
     <div class="field"><label for="cNotas">Anotações</label><textarea class="inp" id="cNotas" placeholder="Renda, FGTS, preferência de planta, objeções…">${esc(c.notas)}</textarea></div>
     <button class="btn pri wide" id="cSave">${novo ? 'Salvar cliente' : 'Salvar alterações'}</button>
@@ -919,7 +926,7 @@ async function saveCliente(form){
 }
 async function syncClienteCal(c, want){
   if (want && c.lembrete && ATIVAS.includes(c.etapa)) {
-    const body = {summary: `Retorno: ${c.nome}`, description: `${P(c.produtoId).nome} · ${c.etapa} · corretor: ${B(c.corretorId).nome}${c.fone ? '\nTelefone: ' + c.fone : ''}${c.notas ? '\n\n' + c.notas : ''}`, start: evTime(c.lembrete), end: evTime(endOf(c.lembrete, 15)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: 0}]}};
+    const body = {summary: `Retorno: ${c.nome}`, description: `${P(c.produtoId).nome} · ${c.etapa} · corretor: ${B(c.corretorId).nome}${c.fone ? '\nTelefone: ' + c.fone : ''}${c.notas ? '\n\n' + c.notas : ''}`, start: evTime(c.lembrete), end: evTime(endOf(c.lembrete, 15)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: antec()}]}};
     if (c.calEventId) { try { await cal('calendars/primary/events/' + c.calEventId, {method: 'PATCH', body: JSON.stringify(body)}); return; } catch(e) { c.calEventId = null; } }
     const ev = await cal('calendars/primary/events', {method: 'POST', body: JSON.stringify(body)}); c.calEventId = ev.id;
   } else if (c.calEventId) {
@@ -997,7 +1004,7 @@ async function gravarAtend(data, old, extras){
       const emails = [...new Set(parts.filter(u => u !== me.uid).map(u => (people[u]||{}).email).filter(Boolean).concat(extras))];
       const body = {summary: data.titulo + (data.cliente ? ' · ' + data.cliente : ''), location: data.local,
         description: [data.produto && 'Produto: ' + data.produto, data.notas].filter(Boolean).join('\n\n') + '\n\nAgendado pelo Foco.',
-        start: evTime(data.inicio), end: evTime(endOf(data.inicio, data.duracao)), attendees: emails.map(email => ({email}))};
+        start: evTime(data.inicio), end: evTime(endOf(data.inicio, data.duracao)), attendees: emails.map(email => ({email})), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: Math.max(antec(), 30)}, {method: 'popup', minutes: 24 * 60}]}};
       let ev;
       if (old && old.eventId) ev = await cal(`calendars/primary/events/${old.eventId}?sendUpdates=all`, {method: 'PATCH', body: JSON.stringify(body)});
       else ev = await cal('calendars/primary/events?sendUpdates=all', {method: 'POST', body: JSON.stringify(body)});
@@ -1022,7 +1029,7 @@ function sheetNovoAgenda(){
 function sheetTarefa(x, tipo){
   const novo = !x; tipo = x ? x.tipo : tipo;
   const comp = tipo === 'compromisso', dia = ui.tab === 'agenda' ? ui.agendaDia : today();
-  x = x || {tipo, titulo:'', data: dia, hora: comp ? '09:00' : '', duracao: 60, local:'', categoria: 'Trabalho', prioridade:'normal', notas:'', repetir:'', cal: comp};
+  x = x || {tipo, titulo:'', data: dia, hora: comp ? '09:00' : '', duracao: 60, local:'', categoria: 'Trabalho', prioridade:'normal', notas:'', repetir:'', cal: lembreteAuto()};
   openSheet(novo ? (comp ? 'Novo compromisso' : 'Nova tarefa') : (comp ? 'Compromisso' : 'Tarefa'), `<form class="form" data-form="tarefa" data-id="${x.id || ''}" data-tipo="${tipo}">
     <div class="field"><label for="tTit">${comp ? 'O que é' : 'O que fazer'}</label><input class="inp" id="tTit" value="${esc(x.titulo)}" required ${novo ? 'autofocus' : ''} autocomplete="off" placeholder="${comp ? 'Reunião de equipe, dentista, treinamento…' : 'Enviar tabela para a equipe, pagar boleto…'}"></div>
     <div class="f2"><div class="field"><label for="tDia">Dia</label><input class="inp" id="tDia" type="date" value="${x.data}" required></div>
@@ -1045,7 +1052,7 @@ async function syncTarefaCal(x, want){
   if (want && comHora) {
     const ini = x.data + 'T' + x.hora, dur = x.tipo === 'compromisso' ? (x.duracao || 60) : 30;
     const body = {summary: (x.tipo === 'tarefa' ? 'Tarefa: ' : '') + x.titulo, location: x.local || '', description: [x.categoria, x.notas].filter(Boolean).join('\n') + '\n\nCriado pelo Foco.',
-      start: evTime(ini), end: evTime(endOf(ini, dur)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: x.tipo === 'compromisso' ? 30 : 0}]}};
+      start: evTime(ini), end: evTime(endOf(ini, dur)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: antec()}]}};
     if (x.calEventId) { try { await cal('calendars/primary/events/' + x.calEventId, {method: 'PATCH', body: JSON.stringify(body)}); return; } catch(e) { x.calEventId = null; } }
     const ev = await cal('calendars/primary/events', {method: 'POST', body: JSON.stringify(body)}); x.calEventId = ev.id;
   } else if (x.calEventId) { try { await cal('calendars/primary/events/' + x.calEventId, {method: 'DELETE'}); } catch(e) {} x.calEventId = null; }
@@ -1055,8 +1062,8 @@ async function saveTarefa(form){
   const x = novo ? {id: uid(), tipo, criado: today()} : find(S.tarefas, id);
   Object.assign(x, {titulo: val('tTit'), data: val('tDia'), hora: val('tHora'), categoria: val('tCat'), notas: val('tNotas')});
   if (tipo === 'compromisso') Object.assign(x, {duracao: +val('tDur') || 60, local: val('tLocal'), repetir: val('tRep')}); else x.prioridade = val('tPri');
-  const want = $('#tCal').classList.contains('on'); x.cal = want;
-  if (want && !x.hora) { toast(tipo === 'tarefa' ? 'Para ir à Google Agenda, a tarefa precisa de horário.' : 'Escolha o horário.', true); return; }
+  const want = $('#tCal').classList.contains('on') && !!val('tHora'); x.cal = want;
+  if (want && !x.hora) { if (tipo === 'tarefa') x.cal = false; else { toast('Escolha o horário.', true); return; } }
   const btn = $('#tSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Salvando';
   if (want && !hasTok()) { try { await requestTok(); } catch(e) {} }
   const reps = novo && +val('tRep') ? +val('tRep') : 0;
@@ -1380,6 +1387,8 @@ const ACT = {
   },
   delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
+  lembreteAuto: el => { const on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-checked', on); S.prefs = Object.assign({}, S.prefs, {lembreteAuto: on}); save('prefs'); toast(on ? 'Lembretes na Google Agenda ligados' : 'Lembretes na Google Agenda desligados'); },
+  antec: el => { S.prefs = Object.assign({}, S.prefs, {antec: +el.dataset.v}); save('prefs'); el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); toast(+el.dataset.v ? `Aviso ${el.textContent} antes` : 'Aviso na hora'); },
   outraFrase: () => {
     const q = $('#fraseTxt'), card = $('#fraseCard');
     const swap = () => { ui.fraseOff = (ui.fraseOff || 0) + 1; const tmp = document.createElement('div'); tmp.innerHTML = cardFrase(); card.replaceWith(tmp.firstElementChild); const n = $('#fraseTxt'); if (n && !RM.matches) n.animate([{opacity:0, transform:'translateY(8px)', filter:'blur(4px)'}, {opacity:1, transform:'none', filter:'blur(0)'}], {duration: 460, easing: 'cubic-bezier(.22,.8,.24,1)'}); };
