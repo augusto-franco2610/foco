@@ -28,5 +28,19 @@ service cloud.firestore {
       );
       allow delete: if request.auth != null && resource.data.criadoPor == request.auth.uid;
     }
+
+    // Clientes compartilhados entre corretores: só quem está em "membros" vê e edita.
+    match /compartilhados/{id} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.membros;
+      allow create: if request.auth != null
+        && request.resource.data.dono == request.auth.uid
+        && request.auth.uid in request.resource.data.membros;
+      allow update: if request.auth != null && request.auth.uid in resource.data.membros
+        && request.resource.data.dono == resource.data.dono
+        && (request.auth.uid == resource.data.dono
+            || request.resource.data.membros == resource.data.membros
+            || request.resource.data.membros == resource.data.membros.removeAll([request.auth.uid]));
+      allow delete: if request.auth != null && resource.data.dono == request.auth.uid;
+    }
   }
 }

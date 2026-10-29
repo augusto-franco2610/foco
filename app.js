@@ -99,7 +99,57 @@ const ui = {
 const TABS = [['hoje','Hoje'],['clientes','Clientes'],['agenda','Agenda'],['corpo','Corpo'],['estudos','Estudos']];
 
 const P = id => S.produtos.find(p => p.id === id) || {nome:'Sem produto', cor:'#8E8E93'};
-const B = id => S.corretores.find(c => c.id === id) || {nome:'—'};
+const B = id => S.corretores.find(c => c.id === id) || (String(id).startsWith('sh-') ? {nome: (recebidosMap[id.slice(3)] || {}).corretorNome || 'Parceiro'} : {nome:'—'});
+/* ---------- clientes compartilhados ----------
+   compartilhados/{id}: {dono, membros:[uid], cliente:{...}, cal:{uid: eventId}, atualizado, atualizadoPor} */
+let recebidos = [], recebidosMap = {}, sharesMeus = {};
+const CLI = () => S.clientes.concat(recebidos);
+const findCli = id => CLI().find(c => c.id === id);
+const CAMPOS_CLI = ['nome','fone','produtoId','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','criado'];
+function snapCliente(c){ const o = {}; CAMPOS_CLI.forEach(k => { if (c[k] !== undefined) o[k] = c[k]; }); o.produtoNome = P(c.produtoId).nome; o.corretorNome = c._recebido ? (c.corretorNome || '') : B(c.corretorId).nome; return o; }
+async function pushShare(c){
+  const sid = c._recebido ? c._share : c.shareId; if (!sid || !fdb) return;
+  const upd = {cliente: snapCliente(c), atualizado: Date.now(), atualizadoPor: me.uid};
+  if (c._recebido) upd['cal.' + me.uid] = c.calEventId || null;
+  try { await fdb.doc('compartilhados/' + sid).update(upd); } catch(e) { toast('Salvo, mas não deu para atualizar o compartilhamento: ' + e.message, true); }
+}
+function salvarCli(c){ if (!c._recebido) save('clientes'); pushShare(c); }
+let unsubSh = null;
+function watchCompartilhados(){
+  if (unsubSh) unsubSh();
+  unsubSh = fdb.collection('compartilhados').where('membros', 'array-contains', me.uid).onSnapshot(qs => {
+    const novos = [], mapa = {}; sharesMeus = {}; let mudouLocal = false;
+    qs.docs.forEach(d => {
+      const x = d.data(); x.id = d.id;
+      if (x.dono === me.uid) {
+        sharesMeus[x.id] = x;
+        const c = S.clientes.find(k => k.shareId === x.id);
+        if (c && x.atualizadoPor !== me.uid && (x.atualizado || 0) > (c.shareSync || 0)) {
+          CAMPOS_CLI.forEach(k => { if (k !== 'criado' && x.cliente[k] !== undefined) c[k] = x.cliente[k]; }); c.shareSync = x.atualizado; mudouLocal = true;
+        }
+      } else {
+        mapa[x.id] = x;
+        const p = S.produtos.find(z => z.id === x.cliente.produtoId) || S.produtos.find(z => normNome(z.nome) === normNome(x.cliente.produtoNome || ''));
+        novos.push(Object.assign({}, x.cliente, {id: 'sh' + x.id, _recebido: true, _share: x.id, _dono: x.dono, corretorId: 'sh-' + x.id, corretorNome: x.cliente.corretorNome, produtoId: p ? p.id : '', calEventId: (x.cal || {})[me.uid] || null}));
+      }
+    });
+    recebidos = novos; recebidosMap = mapa;
+    loadPeople([...new Set(qs.docs.flatMap(d => d.data().membros || []))]).then(() => { if (!$('#sheetWrap').classList.contains('open')) render(false); });
+    if (mudouLocal) save('clientes');
+  }, () => {});
+}
+async function compartilharCliente(c, uids){
+  uids = [...new Set(uids)].filter(u => u !== me.uid);
+  if (!c.shareId) {
+    if (!uids.length) return;
+    const ref = await fdb.collection('compartilhados').add({dono: me.uid, membros: [me.uid, ...uids], cliente: snapCliente(c), cal: {}, criado: Date.now(), atualizado: Date.now(), atualizadoPor: me.uid});
+    c.shareId = ref.id; c.shareSync = Date.now(); save('clientes');
+  } else if (!uids.length) {
+    await fdb.doc('compartilhados/' + c.shareId).delete(); delete c.shareId; save('clientes');
+  } else {
+    await fdb.doc('compartilhados/' + c.shareId).update({membros: [me.uid, ...uids], cliente: snapCliente(c), atualizado: Date.now(), atualizadoPor: me.uid});
+  }
+}
 
 /* ================= Firebase ================= */
 const configOk = CFG.firebase && CFG.firebase.apiKey && CFG.firebase.apiKey !== 'PREENCHER';
@@ -366,7 +416,7 @@ function ring(v, size, stroke, key, color='var(--accent)', inner=''){
 const hbar = (v, key, color) => `<div class="hbar"><i style="${color?`background:${color};`:''}transform:scaleX(0)" data-bar="${clamp(v)}" data-k="${key}"></i></div>`;
 
 /* ---------- regras derivadas ---------- */
-const ativos = () => S.clientes.filter(c => ATIVAS.includes(c.etapa));
+const ativos = () => CLI().filter(c => ATIVAS.includes(c.etapa));
 const dueClientes = () => { const t = today(); return ativos().filter(c => c.lembrete && c.lembrete.slice(0,10) <= t).sort(byKey('lembrete')); };
 function whenLabel(lem){
   if (!lem) return {txt:'Sem lembrete', cls:'flat'};
@@ -504,7 +554,7 @@ function viewHoje(){
   const nome = (me.displayName || '').split(' ')[0];
   const tasks = [];
   dueClientes().forEach(c => tasks.push({k:'cli', id:c.id, t:`Retornar ${c.nome}`, s:[P(c.produtoId).nome, B(c.corretorId).nome, whenLabel(c.lembrete)], done:false, late:c.lembrete.slice(0,10) < t, cor:P(c.produtoId).cor}));
-  S.clientes.filter(c => (c.contatos||[]).some(x => x.slice(0,10) === t) && !tasks.some(x => x.id === c.id)).forEach(c => tasks.push({k:'cli', id:c.id, t:`Retorno: ${c.nome}`, s:[P(c.produtoId).nome], done:true, cor:P(c.produtoId).cor}));
+  CLI().filter(c => (c.contatos||[]).some(x => x.slice(0,10) === t) && !tasks.some(x => x.id === c.id)).forEach(c => tasks.push({k:'cli', id:c.id, t:`Retorno: ${c.nome}`, s:[P(c.produtoId).nome], done:true, cor:P(c.produtoId).cor}));
   atendDia(t).forEach(a => tasks.push({k:'at', id:a.id, t:a.titulo + (a.cliente ? ' · ' + a.cliente : ''), s:[a.inicio.slice(11,16), a.local||''], done: parseDT(endOf(a.inicio, a.duracao||60)) < now}));
   tarefasAtrasadas().forEach(x => tasks.push({k:'tar', id:x.id, t:x.titulo, s:[x.categoria, x.prioridade === 'alta' ? 'prioridade alta' : ''], done:false, late:true}));
   tarefasDia(t).forEach(x => tasks.push({k: x.tipo === 'compromisso' ? 'comp' : 'tar', id:x.id, t:x.titulo, s:[x.hora || (x.tipo === 'tarefa' ? 'Hoje' : ''), x.categoria, x.local || ''], done: x.tipo === 'tarefa' ? !!x.feitaEm : (x.hora ? parseDT(endOf(t + 'T' + x.hora, x.duracao || 60)) < now : false)}));
@@ -626,7 +676,7 @@ function cardPorCorretor(){
 /* ================= CLIENTES ================= */
 function viewClientes(){
   const fc = ui.clientesFiltroCor, fp = ui.clientesFiltroProd, fe = ui.clientesEtapa;
-  let base = S.clientes.filter(c => (fc === 'todos' || (fc === 'quentes' ? c.temp === 'Quente' && ATIVAS.includes(c.etapa) : c.corretorId === fc)) && (fp === 'todos' || c.produtoId === fp));
+  let base = CLI().filter(c => (fc === 'todos' || (fc === 'quentes' ? c.temp === 'Quente' && ATIVAS.includes(c.etapa) : fc === 'recebidos' ? c._recebido : fc === 'meusComp' ? !!c.shareId : c.corretorId === fc)) && (fp === 'todos' || c.produtoId === fp));
   const counts = ETAPAS.map(e => base.filter(c => c.etapa === e).length), maxC = Math.max(1, ...counts);
   let list = fe ? base.filter(c => c.etapa === fe) : base.filter(c => ATIVAS.includes(c.etapa));
   const t = today();
@@ -635,7 +685,7 @@ function viewClientes(){
     return la < lb ? -1 : la > lb ? 1 : a.nome.localeCompare(b.nome);
   });
   const conv = base.length ? counts[VI] / base.length : 0;
-  const chips = [['todos','Todos'],['quentes','Quentes'], ...S.corretores.map(c => [c.id, c.nome])];
+  const chips = [['todos','Todos'],['quentes','Quentes'], ...(recebidos.length ? [['recebidos','Compartilhados comigo']] : []), ...(S.clientes.some(c => c.shareId) ? [['meusComp','Que compartilhei']] : []), ...S.corretores.map(c => [c.id, c.nome])];
   const vf = vgv(base);
   return head(`${ativos().length} ativos · VGV ${brlCurto(vf.previsto)}`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
   <div class="chips rv">${chips.map(([k,l]) => `<button class="chip${fc === k ? ' on' : ''}" data-act="fcor" data-v="${k}">${esc(l)}</button>`).join('')}</div>
@@ -644,7 +694,7 @@ function viewClientes(){
     <div class="funnel${fe ? ' filtering' : ''}">${ETAPAS.map((e, j) => `<button class="fstage${fe === e ? ' on' : ''}" data-act="fetapa" data-v="${e}" style="--j:${j}"><span class="nm">${e}</span><span class="tr"><i style="${e === 'Venda' ? 'background:var(--ok);' : e === 'Perdido' ? 'background:var(--fg2);' : ''}transform:scaleX(0)" data-bar="${counts[j] / maxC}" data-k="fn${j}"></i></span><span class="ct num" >${counts[j]}</span></button>`).join('')}</div>
   </section>
   <div class="sec-row rv" style="padding:4px 2px 0"><span class="sec-title" style="margin:0">${fe ? esc(fe) : 'Em andamento'} · ${list.length}</span></div>
-  ${list.length ? list.map(c => clienteCard(c, t)).join('') : `<section class="card rv">${empty('clientes', S.clientes.length ? 'Nenhum cliente neste filtro' : 'Seus clientes quentes ficam aqui', S.clientes.length ? 'Troque o corretor, o produto ou a etapa.' : 'Cadastre o cliente com produto, corretor, etapa e a data do retorno.', `<button class="btn pri" data-act="novoCliente">${ic('plus','s')}Novo cliente</button>`)}</section>`}
+  ${list.length ? list.map(c => clienteCard(c, t)).join('') : `<section class="card rv">${empty('clientes', CLI().length ? 'Nenhum cliente neste filtro' : 'Seus clientes quentes ficam aqui', S.clientes.length ? 'Troque o corretor, o produto ou a etapa.' : 'Cadastre o cliente com produto, corretor, etapa e a data do retorno.', `<button class="btn pri" data-act="novoCliente">${ic('plus','s')}Novo cliente</button>`)}</section>`}
   `;
 }
 function clienteCard(c){
@@ -654,7 +704,7 @@ function clienteCard(c){
     <div class="top"><div class="grow" style="min-width:0;text-align:left"><div class="nm">${esc(c.nome)}</div>
       <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}</div></div>
       <span class="when ${w.cls}">${esc(w.txt)}</span></div>
-    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${c.temp}">●</span>${c.temp}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}</div>
+    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${c.temp}">●</span>${c.temp}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
     ${idx >= 0 && idx <= VI ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / (VI + 1)}" data-k="cb${c.id}"></i></div>` : ''}
   </button>`;
 }
@@ -913,6 +963,18 @@ const val = id => { const el = document.getElementById(id); return el ? el.value
 const num = id => { const v = parseFloat(val(id).replace(',', '.')); return isFinite(v) ? v : 0; };
 const confirmBox = (msg, act, id) => `<div class="confirm" id="cfm" hidden><b>${msg}</b><div class="btnrow"><button type="button" class="btn sec" data-act="cfmNo">Manter</button><button type="button" class="btn dan" data-act="${act}" data-id="${id}">Excluir</button></div></div>`;
 
+function blocoShare(c){
+  if (c._recebido) { const dono = people[c._dono] || {};
+    return `<div class="card share-info" style="box-shadow:none">${face(c._dono)}<div class="grow small"><b>Compartilhado por ${esc(dono.nome || dono.email || 'um parceiro')}</b><div class="muted">Suas alterações de etapa, retornos e anotações aparecem para ele também.</div></div></div>`; }
+  const sh = c.shareId && sharesMeus[c.shareId], outros = sh ? sh.membros.filter(u => u !== me.uid) : [];
+  return `<div class="card" style="box-shadow:none;display:grid;gap:10px">
+    <div class="sec-row"><b>Compartilhar</b>${outros.length ? `<div class="faces">${outros.map(face).join('')}</div>` : ''}</div>
+    <p class="small muted" style="margin:0">${outros.length ? 'Acompanham este cliente: ' + outros.map(u => esc((people[u] || {}).nome || (people[u] || {}).email || 'parceiro')).join(', ') + '.' : 'Escolha corretores que já entraram no Foco. O cliente aparece na conta deles e as atualizações valem para os dois lados.'}</p>
+    <button type="button" class="btn sec wide" data-act="shareAbrir">${ic('users2','s')}${outros.length ? 'Alterar quem acompanha' : 'Compartilhar cliente'}</button>
+    <div id="shBox" data-id="${c.id}" hidden style="display:grid;gap:10px"><div class="chips" id="shPeople" style="flex-wrap:wrap"><span class="small muted">Carregando…</span></div>
+      <button type="button" class="btn pri wide" data-act="shareSalvar" data-id="${c.id}">Salvar compartilhamento</button></div>
+  </div>`;
+}
 function sheetCliente(c){
   const novo = !c; const t = today();
   c = c || {nome:'', fone:'', produtoId: ui.clientesFiltroProd !== 'todos' ? ui.clientesFiltroProd : '', corretorId: !['todos','quentes'].includes(ui.clientesFiltroCor) ? ui.clientesFiltroCor : 'eu', etapa:'Novo lead', temp:'Quente', lembrete: t + 'T23:59', notas:'', contatos:[]};
@@ -924,7 +986,7 @@ function sheetCliente(c){
     <div class="field"><label for="cNome">Nome</label><input class="inp" id="cNome" value="${esc(c.nome)}" required ${novo ? 'autofocus' : ''} autocomplete="off"></div>
     <div class="field"><label for="cFone">Telefone / WhatsApp</label><input class="inp" id="cFone" type="tel" inputmode="tel" value="${esc(c.fone)}" placeholder="11 9 9999-9999"></div>
     <div class="f2"><div class="field"><label for="cProd">Produto</label><select class="inp" id="cProd">${prodOptions(c.produtoId)}<option value=""${!c.produtoId ? ' selected' : ''}>Outro / sem produto</option></select></div>
-      <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
+      <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(c._recebido ? (c.corretorNome || '') : S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
     <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
@@ -934,7 +996,9 @@ function sheetCliente(c){
     <div class="field"><label for="cNotas">Anotações</label><textarea class="inp" id="cNotas" placeholder="Renda, FGTS, preferência de planta, objeções…">${esc(c.notas)}</textarea></div>
     <button class="btn pri wide" id="cSave">${novo ? 'Salvar cliente' : 'Salvar alterações'}</button>
     ${!novo && (c.contatos||[]).length ? `<div class="card" style="box-shadow:none"><h2>Retornos registrados</h2><div class="list">${[...c.contatos].reverse().slice(0, 8).map(x => `<div class="row small"><span class="grow">${parseDT(x).toLocaleString('pt-BR', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'})}</span></div>`).join('')}</div></div>` : ''}
-    ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">${ic('trash','s')}Excluir cliente</button>${confirmBox('Excluir ' + esc(c.nome) + '? Isso não pode ser desfeito.', 'delCliente', c.id)}` : ''}
+    ${!novo ? blocoShare(c) : ''}
+    ${!novo ? (c._recebido ? `<button type="button" class="btn dan wide" data-act="askDel">Parar de acompanhar</button>${confirmBox('Parar de acompanhar ' + esc(c.nome) + '? O cliente continua com quem compartilhou.', 'delCliente', c.id)}`
+      : `<button type="button" class="btn dan wide" data-act="askDel">${ic('trash','s')}Excluir cliente</button>${confirmBox('Excluir ' + esc(c.nome) + '? Isso não pode ser desfeito' + (c.shareId ? ' e some também para quem você compartilhou' : '') + '.', 'delCliente', c.id)}`) : ''}
   </form>`);
 }
 const TIPOS_VISITA = ['Visita ao decorado','Visita ao imóvel','Visita ao stand','Visita à obra'];
@@ -965,11 +1029,13 @@ function blocoVisita(c, novo){
 }
 async function saveCliente(form){
   const id = form.dataset.id, novo = !id;
-  const c = novo ? {id: uid(), criado: new Date().toISOString(), contatos: []} : S.clientes.find(x => x.id === id);
+  const c = novo ? {id: uid(), criado: new Date().toISOString(), contatos: []} : findCli(id);
   const etapaAnt = c.etapa;
   const corNome = val('cCor');
-  let cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
-  if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); }
+  let cor = {id: c.corretorId};
+  if (c._recebido) c.corretorNome = corNome;
+  else { cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
+    if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); } }
   Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
   marcarVenda(c);
   if (etapaAnt && etapaAnt !== c.etapa) (c.historico = c.historico || []).push({de: etapaAnt, para: c.etapa, em: new Date().toISOString()});
@@ -987,7 +1053,7 @@ async function saveCliente(form){
   const btn = $('#cSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Salvando';
   if ((wantCal || (visita && visita.convite)) && !hasTok()) { try { await requestTok(); } catch(e) {} }
   try { await syncClienteCal(c, wantCal); } catch(e) { toast('Cliente salvo, mas a agenda falhou: ' + e.message, true); }
-  save('clientes');
+  salvarCli(c);
   if (visita) {
     try { await gravarAtend(visita, null, []); delete gcache[visita.inicio.slice(0,10)]; closeSheet(); render(false); toast(`Visita de ${c.nome} agendada para ${ddmm(visita.inicio)} às ${visita.inicio.slice(11,16)}`); return; }
     catch(e) { closeSheet(); render(false); toast('Cliente salvo, mas a visita não foi agendada: ' + e.message, true); return; }
@@ -1354,7 +1420,7 @@ const ACT = {
   goestudos: el => { ui.estudos = el.dataset.v; switchTab('estudos'); },
   taskgo: el => {
     const k = el.dataset.k;
-    if (k === 'cli') return sheetCliente(find(S.clientes, el.dataset.id));
+    if (k === 'cli') return sheetCliente(findCli(el.dataset.id));
     if (k === 'at') return openAtend(el.dataset.id);
     if (k === 'tar' || k === 'comp') return sheetTarefa(find(S.tarefas, el.dataset.id));
     if (k === 'peso') { ui.corpo = 'peso'; switchTab('corpo'); setTimeout(() => { const i = $('#pesoKg'); if (i) i.focus(); }, 450); return; }
@@ -1364,18 +1430,18 @@ const ACT = {
     if (k === 'curso') { ui.estudos = 'cursos'; ui.cursoAberto = cursosAtivos()[0] && cursosAtivos()[0].id; return switchTab('estudos'); }
   },
   contato: el => {
-    const c = find(S.clientes, el.dataset.id); if (!c) return;
+    const c = findCli(el.dataset.id); if (!c) return;
     (c.contatos = c.contatos || []).push(localDT(new Date()));
     if (c.lembrete && c.lembrete.slice(0,10) <= today()) c.lembrete = '';
     if (el.classList.contains('check')) { el.classList.add('on', 'pop'); }
-    save('clientes'); closeSheet();
+    salvarCli(c); closeSheet();
     setTimeout(() => render(false), RM.matches ? 0 : 380);
     toast(`Retorno de ${c.nome} registrado`);
   },
   avancar: el => {
-    const c = find(S.clientes, el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= VI) return;
+    const c = findCli(el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= VI) return;
     (c.historico = c.historico || []).push({de: c.etapa, para: ETAPAS[i+1], em: new Date().toISOString()});
-    c.etapa = ETAPAS[i+1]; marcarVenda(c); save('clientes'); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
+    c.etapa = ETAPAS[i+1]; marcarVenda(c); salvarCli(c); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
   },
   novoCliente: () => sheetCliente(null),
   visitaToggle: async () => {
@@ -1386,18 +1452,36 @@ const ACT = {
       box.innerHTML = others.length ? others.map(([u, p]) => `<button type="button" class="chip" data-act="pickPerson" data-v="${u}">${esc(p.nome || p.email)}</button>`).join('') : '<span class="small muted">Nenhum parceiro entrou no app ainda.</span>'; }
   },
   visitaFeita: async el => {
-    const a = find(atend, el.dataset.id), c = find(S.clientes, el.dataset.c); if (!a || !c) return;
+    const a = find(atend, el.dataset.id), c = findCli(el.dataset.c); if (!a || !c) return;
     try { await fdb.doc('atendimentos/' + a.id).update({status: 'realizado', atualizado: Date.now()}); } catch(e) { return toast('Não deu para marcar: ' + e.message, true); }
-    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita efetuada')) { (c.historico = c.historico || []).push({de: c.etapa, para: 'Visita efetuada', em: new Date().toISOString()}); c.etapa = 'Visita efetuada'; save('clientes'); }
+    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita efetuada')) { (c.historico = c.historico || []).push({de: c.etapa, para: 'Visita efetuada', em: new Date().toISOString()}); c.etapa = 'Visita efetuada'; salvarCli(c); }
     closeSheet(); render(false); toast(`Visita de ${c.nome} efetuada`);
   },
-  abrirCliente: el => sheetCliente(find(S.clientes, el.dataset.id)),
+  abrirCliente: el => sheetCliente(findCli(el.dataset.id)),
   fcor: el => { ui.clientesFiltroCor = el.dataset.v; render(false); },
   fprod: el => { ui.clientesFiltroProd = el.dataset.v; render(false); },
   fetapa: el => { ui.clientesEtapa = el.dataset.v && ui.clientesEtapa !== el.dataset.v ? el.dataset.v : null; render(false); },
   askDel: () => { const c = $('#cfm'); if (c) { c.hidden = false; c.scrollIntoView({behavior: RM.matches ? 'auto' : 'smooth', block: 'center'}); c.animate && c.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 260}); } },
   cfmNo: () => { const c = $('#cfm'); if (c) c.hidden = true; },
-  delCliente: async el => { const c = find(S.clientes, el.dataset.id); if (c && c.calEventId && hasTok()) { try { await cal('calendars/primary/events/' + c.calEventId, {method:'DELETE'}); } catch(e) {} } S.clientes = S.clientes.filter(x => x.id !== el.dataset.id); save('clientes'); closeSheet(); render(false); toast('Cliente excluído'); },
+  delCliente: async el => { const c = findCli(el.dataset.id); if (!c) return; if (c.calEventId && hasTok()) { try { await cal('calendars/primary/events/' + c.calEventId, {method:'DELETE'}); } catch(e) {} }
+    if (c._recebido) { try { await fdb.doc('compartilhados/' + c._share).update({membros: firebase.firestore.FieldValue.arrayRemove(me.uid)}); } catch(e) { return toast('Não deu para sair: ' + e.message, true); } closeSheet(); toast('Você não acompanha mais ' + c.nome); return; }
+    if (c.shareId) { try { await fdb.doc('compartilhados/' + c.shareId).delete(); } catch(e) {} }
+    S.clientes = S.clientes.filter(x => x.id !== el.dataset.id); save('clientes'); closeSheet(); render(false); toast('Cliente excluído'); },
+  shareSalvar: async el => {
+    const c = findCli(el.dataset.id); if (!c) return;
+    const uids = [...document.querySelectorAll('#shPeople .chip.on')].map(b => b.dataset.v);
+    el.disabled = true; el.innerHTML = '<span class="spin"></span>Salvando';
+    try { await compartilharCliente(c, uids); toast(uids.length ? `${c.nome} compartilhado com ${uids.length} ${uids.length === 1 ? 'pessoa' : 'pessoas'}` : 'Compartilhamento removido'); closeSheet(); render(false); }
+    catch(e) { el.disabled = false; el.textContent = 'Salvar compartilhamento'; toast(e.code === 'permission-denied' ? 'O compartilhamento ainda está sendo liberado no servidor. Tente de novo mais tarde.' : 'Não deu para compartilhar: ' + e.message, true); }
+  },
+  shareAbrir: async () => {
+    const box = $('#shBox'); box.hidden = !box.hidden; if (box.hidden) return;
+    if (!RM.matches) box.animate([{opacity:0, transform:'translateY(-6px)'}, {opacity:1, transform:'none'}], {duration: 280});
+    await loadDirectory(); const c = findCli(box.dataset.id), sel = new Set(c && c.shareId && sharesMeus[c.shareId] ? sharesMeus[c.shareId].membros : []);
+    const others = Object.entries(people).filter(([u]) => u !== me.uid);
+    $('#shPeople').innerHTML = others.length ? others.map(([u, p]) => `<button type="button" class="chip${sel.has(u) ? ' on' : ''}" data-act="pickPerson" data-v="${u}">${esc(p.nome || p.email)}</button>`).join('')
+      : '<span class="small muted">Ninguém mais entrou no Foco ainda. Mande o link do app para o corretor; depois que ele entrar com o Google, aparece aqui.</span>';
+  },
   sw: el => { el.classList.toggle('on'); el.setAttribute('aria-checked', el.classList.contains('on')); },
   tgl: el => el.classList.toggle('on'),
   pickPerson: el => el.classList.toggle('on'),
@@ -1527,7 +1611,7 @@ const ACT = {
     toast({auto:'Tema automático (segue o celular)', light:'Tema claro', dark:'Tema escuro'}[v]);
   },
   backup: async () => { const txt = JSON.stringify(S); try { await navigator.clipboard.writeText(txt); toast('Backup copiado'); } catch(e) { toast('Não deu para copiar', true); } },
-  sair: async () => { closeSheet(); if (unsubAt) unsubAt(); try { sessionStorage.removeItem('foco-gtok'); } catch(e) {} tok = null; await auth.signOut(); }
+  sair: async () => { closeSheet(); if (unsubAt) unsubAt(); if (unsubSh) unsubSh(); try { sessionStorage.removeItem('foco-gtok'); } catch(e) {} tok = null; await auth.signOut(); }
 };
 function animateList(){ const l = document.querySelector('#view .card:last-child .list, #view .card:last-child .empty'); if (l && !RM.matches) l.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 380, easing: 'cubic-bezier(.22,.8,.24,1)'}); }
 function openAtend(id){ const a = find(atend, id); if (a) sheetAtend(a); }
@@ -1643,6 +1727,7 @@ async function onUser(u){
   people[u.uid] = {nome: u.displayName, email: u.email, foto: u.photoURL};
   try { await loadUserData(); } catch(e) { toast('Não deu para carregar seus dados. Verifique a conexão.', true); }
   watchAtendimentos();
+  watchCompartilhados();
   render(true); placePill();
   registrarSW().then(() => atualizarFilaPush(false));
 }
