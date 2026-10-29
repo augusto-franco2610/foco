@@ -441,6 +441,27 @@ const ALIMENTOS = [
   ['Refrigerante comum',41,0,10.4,0,'lata (350 ml)',350],['Cerveja pilsen',41,0.6,3.3,0,'lata (350 ml)',350]
 ];
 const alimentosTodos = () => ALIMENTOS.map(a => ({nome:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6]})).concat((S.alimentacao.meus || []).map(m => Object.assign({meu:true}, m)));
+// Base completa (TBCA + TACO), carregada só quando a tela de refeição abre
+let BASE = null, baseLoading = null;
+const normBusca = t => String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+function carregarBase(){
+  if (BASE || baseLoading) return baseLoading;
+  baseLoading = fetch('alimentos.json').then(r => r.json()).then(d => {
+    BASE = d.itens.map(([nome, k, p, c, g, ci]) => { const i = nome.indexOf(' (') > 0 ? nome.indexOf(' (') : nome.indexOf(', ('); return {nome, principal: i > 0 ? nome.slice(0, i) : nome, det: i > 0 ? nome.slice(i + 2).replace(/\)$/, '') : '', k, p, c, g, pn: 'porção', pg: 100, grupo: d.classes[ci], q100: true, busca: normBusca(nome), bp: normBusca(i > 0 ? nome.slice(0, i) : nome)}; });
+    BASE.fontes = d.fontes; return BASE;
+  }).catch(() => { baseLoading = null; return null; });
+  return baseLoading;
+}
+function buscarAlimentos(q){
+  const qs = normBusca(q); if (qs.length < 2) return [];
+  const ws = qs.split(' ');
+  const hit = t => ws.every(w => t.includes(w));
+  const meus = (S.alimentacao.meus || []).map(m => Object.assign({meu: true, principal: m.nome}, m)).filter(a => hit(normBusca(a.nome)));
+  const rapidos = ALIMENTOS.map(a => ({nome:a[0], principal:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6], rapido:true})).filter(a => hit(normBusca(a.nome)));
+  const base = (BASE || []).filter(a => hit(a.busca)).map(a => ({a, s: (a.bp.startsWith(ws[0]) ? 0 : a.busca.startsWith(ws[0]) ? 300 : 600) + (ws.every(w => a.bp.includes(w)) ? 0 : 200) + a.bp.length + a.busca.length / 20}))
+    .sort((x, y) => x.s - y.s).slice(0, 14).map(x => x.a);
+  return meus.concat(rapidos.slice(0, 4), base).slice(0, 16);
+}
 const mealKcal = r => r.kcal != null ? r.kcal : kcalOf(r);
 
 /* ================= HOJE ================= */
@@ -903,7 +924,7 @@ function sheetRotina(r){
     ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir rotina</button>${confirmBox('Excluir esta rotina?', 'delRotina', r.id)}` : ''}
   </form>`);
 }
-let mealItens = [];
+let mealItens = [], mealRes = [];
 const itemVals = it => { const gr = it.un === 'g' ? it.q : it.q * it.pg; const f = gr / 100; return {k: it.k * f, p: it.p * f, c: it.c * f, g: it.g * f, gr}; };
 function sheetRefeicao(){
   mealItens = [];
@@ -913,7 +934,7 @@ function sheetRefeicao(){
   openSheet('Nova refeição', `<form class="form" data-form="refeicao">
     <div class="field"><label for="mNome">Refeição</label><input class="inp" id="mNome" list="mNomes" value="${sug}" required autocomplete="off"><datalist id="mNomes">${['Café da manhã','Lanche da manhã','Almoço','Lanche','Pré-treino','Pós-treino','Jantar','Ceia'].map(n => `<option value="${n}"></option>`).join('')}</datalist></div>
     ${rec.length ? `<div class="field"><label>Repetir uma recente</label><div class="chips" style="flex-wrap:wrap">${rec.map((m, i) => `<button type="button" class="chip" data-act="repMeal" data-v="${m.id}">${esc(m.nome)} · ${fmt(mealKcal(m))} kcal</button>`).join('')}</div></div>` : ''}
-    <div class="field"><label for="mBusca">Adicionar alimento</label><input class="inp" id="mBusca" placeholder="Ex.: arroz, frango, banana" autocomplete="off"><div class="list" id="mRes"></div></div>
+    <div class="field"><label for="mBusca">Adicionar alimento</label><input class="inp" id="mBusca" type="search" placeholder="Ex.: arroz integral, peito frango, açaí" autocomplete="off"><div class="list" id="mRes"></div><span class="small muted" id="mFonte">Carregando a tabela de alimentos…</span></div>
     <div class="card" style="box-shadow:none;padding:12px 14px"><div class="list" id="mItens"></div></div>
     <div class="card" style="box-shadow:none;display:grid;gap:6px;background:var(--accent-soft)" id="mTot"></div>
     <button type="button" class="link small" data-act="mealManual" style="justify-self:start">Não achou? Cadastrar alimento</button>
@@ -926,12 +947,15 @@ function sheetRefeicao(){
     </div>
     <button class="btn pri wide" id="mSave">Adicionar refeição</button></form>`);
   const busca = $('#mBusca');
-  busca.addEventListener('input', () => {
-    const q = normNome(busca.value);
-    const res = q.length < 2 ? [] : alimentosTodos().filter(a => normNome(a.nome).includes(q)).slice(0, 7);
-    $('#mRes').innerHTML = res.map((a, i) => `<button type="button" class="row rowbtn" data-act="mealAdd" data-v="${esc(a.nome)}"><span class="grow"><span class="t" style="font-weight:500">${esc(a.nome)}${a.meu ? ' <span class="pill">meu</span>' : ''}</span><span class="s">1 ${esc(a.pn)} · ${fmt(a.k * a.pg / 100)} kcal</span></span>${ic('plus','s')}</button>`).join('')
-      || (q.length >= 2 ? '<p class="small muted" style="margin:6px 0 0">Nada encontrado. Cadastre o alimento abaixo.</p>' : '');
-  });
+  let tmr;
+  const mostrar = () => {
+    const res = buscarAlimentos(busca.value), q = normBusca(busca.value);
+    mealRes = res;
+    $('#mRes').innerHTML = res.map((a, i) => `<button type="button" class="row rowbtn" data-act="mealAdd" data-v="${i}"><span class="grow" style="min-width:0"><span class="t" style="font-weight:500">${esc(a.principal || a.nome)}${a.meu ? ' <span class="pill">meu</span>' : ''}</span>${a.det ? `<span class="s" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.det)}</span>` : ''}<span class="s num">${a.q100 ? `${fmt(a.k)} kcal por 100 g · P ${fmt(a.p, 1)} · C ${fmt(a.c, 1)} · G ${fmt(a.g, 1)}` : `1 ${esc(a.pn)} · ${fmt(a.k * a.pg / 100)} kcal`}</span></span>${ic('plus','s')}</button>`).join('')
+      || (q.length >= 2 ? (BASE ? '<p class="small muted" style="margin:6px 0 0">Nada encontrado. Tente outra palavra ou cadastre o alimento abaixo.</p>' : '<p class="small muted" style="margin:6px 0 0">Carregando a tabela de alimentos…</p>') : '');
+  };
+  busca.addEventListener('input', () => { clearTimeout(tmr); tmr = setTimeout(mostrar, 120); });
+  carregarBase().then(() => { const f = $('#mFonte'); if (f && BASE) f.textContent = `${fmt(BASE.length + ALIMENTOS.length)} alimentos · ${BASE.fontes}`; if (busca.value) mostrar(); });
   drawMeal();
 }
 function drawMeal(){
@@ -1098,7 +1122,7 @@ const ACT = {
   treinoFeito: () => toggleTreino(), treinoAvulso: () => toggleTreino(),
   novaRefeicao: () => sheetRefeicao(),
   repMeal: el => { const m = find(S.alimentacao.refeicoes, el.dataset.v); if (!m) return; $('#mNome').value = m.nome; mealItens = m.itens.map(i => Object.assign({}, i)); drawMeal(); },
-  mealAdd: el => { const a = alimentosTodos().find(x => x.nome === el.dataset.v); if (!a) return; mealItens.push({nome:a.nome, k:a.k, p:a.p, c:a.c, g:a.g, pn:a.pn, pg:a.pg, q:1, un:'p'}); $('#mBusca').value = ''; $('#mRes').innerHTML = ''; drawMeal(); const last = $('#mItens').lastElementChild; if (last && !RM.matches) last.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'none'}], {duration: 320}); },
+  mealAdd: el => { const a = mealRes[+el.dataset.v]; if (!a) return; mealItens.push({nome:a.principal || a.nome, k:a.k, p:a.p, c:a.c, g:a.g, pn:a.pn, pg:a.pg, q: a.q100 ? 100 : 1, un: a.q100 ? 'g' : 'p'}); $('#mBusca').value = ''; $('#mRes').innerHTML = ''; drawMeal(); const last = $('#mItens').lastElementChild; if (last && !RM.matches) last.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'none'}], {duration: 320}); },
   mealDel: el => { mealItens.splice(+el.dataset.v, 1); drawMeal(); },
   mealManual: () => { const b = $('#mManual'); b.hidden = !b.hidden; if (!b.hidden) $('#xN').focus(); },
   mealSalvarMeu: () => {
