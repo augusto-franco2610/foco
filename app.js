@@ -346,7 +346,7 @@ function fraseDoMomento(){
   const g = generoAtual();
   const pool = FRASES.filter(f => g || !/\{/.test(f[1]));
   const d = parseD(today()), dia = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5);
-  return pool[(dia * 2 + (ui.fraseOff || 0)) % pool.length];
+  return pool[(dia * 3 + (ui.fraseOff || 0)) % pool.length];
 }
 function cardFrase(){
   const g = generoAtual(), f = fraseDoMomento();
