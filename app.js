@@ -310,6 +310,79 @@ const cursoProx = c => (c.etapas||[]).find(e => !e.feitaEm);
 const cursosAtivos = () => S.cursos.items.filter(c => cursoProx(c));
 const atendDia = dia => atend.filter(a => a.inicio && a.inicio.slice(0,10) === dia && a.status !== 'cancelado').sort(byKey('inicio'));
 
+
+/* ---------- frases (estoicas traduzidas livremente; motivacionais próprias) ----------
+   {masculino|feminino} adapta ao tratamento escolhido pela conta */
+const FRASES = [
+  ['e','Não é porque as coisas são difíceis que não ousamos; é porque não ousamos que elas são difíceis.','Sêneca'],
+  ['e','Sofremos mais na imaginação do que na realidade.','Sêneca'],
+  ['e','Sorte é o que acontece quando a preparação encontra a oportunidade.','Sêneca'],
+  ['e','Enquanto adiamos, a vida passa.','Sêneca'],
+  ['e','Nenhum vento é favorável para quem não sabe a que porto se dirige.','Sêneca'],
+  ['e','As dificuldades fortalecem a mente, assim como o trabalho fortalece o corpo.','Sêneca'],
+  ['e','Não temos pouco tempo. Desperdiçamos muito.','Sêneca'],
+  ['e','A vida, se bem vivida, é longa o bastante.','Sêneca'],
+  ['e','Quem está em todo lugar não está em lugar nenhum.','Sêneca'],
+  ['e','Às vezes, até viver é um ato de coragem.','Sêneca'],
+  ['e','Você tem poder sobre a sua mente, não sobre os acontecimentos. Perceba isso e encontrará força.','Marco Aurélio'],
+  ['e','O que impede a ação faz a ação avançar. O que está no caminho se torna o caminho.','Marco Aurélio'],
+  ['e','Pare de discutir como deve ser {um homem bom. Seja um|uma mulher boa. Seja uma}.','Marco Aurélio'],
+  ['e','A felicidade da sua vida depende da qualidade dos seus pensamentos.','Marco Aurélio'],
+  ['e','Ao acordar, pense no privilégio de estar {vivo|viva}: respirar, pensar, desfrutar, amar.','Marco Aurélio'],
+  ['e','Faça cada coisa como se fosse a última da sua vida.','Marco Aurélio'],
+  ['e','Se não é certo, não faça. Se não é verdade, não diga.','Marco Aurélio'],
+  ['e','A melhor vingança é não ser como quem te feriu.','Marco Aurélio'],
+  ['e','Não são as coisas que nos perturbam, mas a opinião que temos sobre elas.','Epicteto'],
+  ['e','Primeiro diga a si mesmo o que você quer ser. Depois faça o que precisa ser feito.','Epicteto'],
+  ['e','Ninguém é livre se não é {senhor|senhora} de si.','Epicteto'],
+  ['e','É impossível aprender aquilo que se acha que já sabe.','Epicteto'],
+  ['e','Riqueza não é ter muitas posses, mas ter poucos desejos.','Epicteto'],
+  ['e','Temos dois ouvidos e uma boca para ouvir o dobro do que falamos.','Zenão de Cítio'],
+  ['e','O bem-estar se alcança aos poucos, e isso não é pouca coisa.','Zenão de Cítio'],
+  ['m','Cada não te deixa um passo mais perto do sim.'],
+  ['m','Disciplina é fazer o que precisa ser feito, mesmo sem vontade.'],
+  ['m','Hoje é dia de ligar para quem esfriou. Um retorno pode virar uma venda.'],
+  ['m','Você não precisa estar {motivado|motivada}. Precisa estar {comprometido|comprometida}.'],
+  ['m','Quem acompanha o cliente de perto fecha antes.'],
+  ['m','Pequenas vitórias todo dia constroem grandes resultados.'],
+  ['m','O corpo que você quer está do outro lado do treino de hoje.'],
+  ['m','Você é {o único responsável|a única responsável} pelo seu ritmo.'],
+  ['m','Consistência vence talento quando o talento não é consistente.'],
+  ['m','Uma página por dia ainda é um livro por mês.'],
+  ['m','Seja {lembrado|lembrada} pelo atendimento, não pelo preço.'],
+  ['m','Organize o dia antes que o dia organize você.'],
+  ['m','O cliente compra confiança antes de comprar o imóvel.'],
+  ['m','Faça a ligação que você está adiando.'],
+  ['m','{Cansado|Cansada}? Descanse. Não desista.'],
+  ['m','Quem lidera dá o exemplo primeiro.'],
+  ['m','Sua equipe vai até onde você mostra que dá para ir.'],
+  ['m','Feito é melhor que perfeito. Agora, melhore.'],
+  ['m','Resultado é rotina repetida.'],
+  ['m','Seja 1% melhor que ontem.'],
+  ['m','Você já passou por dias piores. Este também passa.'],
+  ['m','A visita de hoje pode ser a chave que alguém recebe amanhã.'],
+  ['m','{Focado|Focada} no processo, o resultado vem.'],
+  ['m','Não espere a segunda-feira. Comece agora.'],
+  ['m','Cuidar da saúde também é cuidar da carreira.'],
+  ['m','{Preparado|Preparada} hoje, {tranquilo|tranquila} amanhã.']
+];
+const generoTxt = (t, g) => t.replace(/\{([^|}]*)\|([^}]*)\}/g, (_, m, f) => g === 'f' ? f : m);
+function fraseDoMomento(){
+  const g = S.prefs && S.prefs.genero;
+  const pool = FRASES.filter(f => g || !/\{/.test(f[1]));
+  const d = parseD(today()), dia = Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5);
+  return pool[(dia * 7 + (ui.fraseOff || 0)) % pool.length];
+}
+function cardFrase(){
+  const g = S.prefs && S.prefs.genero, f = fraseDoMomento();
+  const est = f[0] === 'e';
+  return `<section class="card frase rv" id="fraseCard"><div class="sec-row"><span class="frase-tag ${est ? 'est' : 'mot'}">${est ? 'Estoicismo' : 'Motivação'}</span>
+      <button class="mini" data-act="outraFrase" aria-label="Mostrar outra frase">Outra frase</button></div>
+    <blockquote class="frase-txt" id="fraseTxt"><p>${esc(generoTxt(f[1], g))}</p>${f[2] ? `<cite>${esc(f[2])}</cite>` : ''}</blockquote>
+    ${g ? '' : `<div class="frase-gen"><span class="small muted">Como as frases devem falar com você?</span><div class="btnrow"><button class="mini" data-act="genero" data-v="m">No masculino</button><button class="mini" data-act="genero" data-v="f">No feminino</button></div></div>`}
+  </section>`;
+}
+
 /* ================= HOJE ================= */
 function viewHoje(){
   const t = today(), now = new Date();
@@ -351,7 +424,7 @@ function viewHoje(){
     <div class="hero-txt"><div class="muted small">Seu dia</div><div class="big"><span class="num" data-count="${done}" data-k="diadone">0</span> de ${tot} feitos</div>
     <div class="small muted">${dueClientes().length} retornos · ${atendDia(t).length} atendimentos</div></div>
   </div></section>
-
+  ${cardFrase()}
   <section class="grid2">
     <button class="card tap kpi rv" data-act="goclientes" data-v="quentes"><span class="lbl">Clientes quentes</span><span class="val num" data-count="${quentes}" data-k="kq">0</span><span class="delta ${atras ? 'down' : 'flat'}">${atras ? atras + ' atrasados' : 'Tudo em dia'}</span></button>
     <button class="card tap kpi rv" data-act="gocorpo" data-v="peso"><span class="lbl">Peso</span><span class="val num">${last ? `<span data-count="${last.kg}" data-dec="1" data-k="kp">0</span><small>kg</small>` : '—'}</span><span class="delta ${d7 == null ? 'flat' : d7 <= 0 ? 'up' : 'down'}">${d7 == null ? 'Registre hoje' : (d7 > 0 ? '+' : '') + fmt(d7, 1) + ' kg em 7 dias'}</span></button>
@@ -598,6 +671,7 @@ function sheetAjustes(){
     <div class="card" style="display:flex;gap:12px;align-items:center;box-shadow:none;background:var(--surface)"><span class="avatar" style="width:48px;height:48px">${me.photoURL ? `<img src="${esc(me.photoURL)}" alt="" referrerpolicy="no-referrer">` : initials(me.displayName)}</span>
       <div class="grow" style="min-width:0"><b>${esc(me.displayName || '')}</b><div class="small muted" style="overflow-wrap:anywhere">${esc(me.email)}</div></div><button class="mini" data-act="sair">Sair</button></div>
     <div class="field"><label>Tema</label>${seg('tema', [['auto','Automático'],['light','Claro'],['dark','Escuro']], th)}</div>
+    <div class="field"><label>Frases do dia falam com você no</label>${seg('genero', [['m','Masculino'],['f','Feminino']], (S.prefs || {}).genero || '')}</div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><div><b>Google Agenda</b><div class="small muted">${hasTok() ? 'Conectada nesta sessão' : 'Desconectada'}</div></div>${hasTok() ? '<span class="pill ok">Ativa</span>' : '<button class="mini" data-act="conectarAgenda">Conectar</button>'}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Produtos</h2><button class="mini" data-act="novoProduto">Adicionar</button></div><p class="small muted" style="margin:6px 0 0">${S.produtos.length} empreendimentos. Os da sua coordenação aparecem primeiro nas listas.</p><input class="inp" id="prodBusca" placeholder="Buscar empreendimento" style="margin-top:10px" autocomplete="off"><div class="list" id="prodLista" style="margin-top:8px">${[...S.produtos].sort((a, b) => (b.coord ? 1 : 0) - (a.coord ? 1 : 0) || a.nome.localeCompare(b.nome)).map(p => `<button class="row rowbtn" data-act="editProduto" data-id="${p.id}" data-busca="${esc(normNome(p.nome + (p.inc || '')))}"><i class="dot" style="background:${p.cor};width:12px;height:12px"></i><span class="grow"><span class="t" style="font-weight:500">${esc(p.nome)}</span><span class="s">${esc(p.inc || 'Sem incorporadora')}${p.coord ? ' · coordenação' : ''}</span></span><span class="small muted">${S.clientes.filter(c => c.produtoId === p.id).length || ''}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Corretores</h2><button class="mini" data-act="novoCorretor">Adicionar</button></div><div class="list" style="margin-top:8px">${S.corretores.map(c => `<button class="row rowbtn" data-act="editCorretor" data-id="${c.id}"><span class="avatar" style="width:28px;height:28px;font-size:11px">${esc(initials(c.nome))}</span><span class="grow t" style="font-weight:500">${esc(c.nome)}${c.id === 'eu' ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted">${S.clientes.filter(x => x.corretorId === c.id).length}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
@@ -932,6 +1006,13 @@ const ACT = {
   repMeal: el => { const m = JSON.parse(el.dataset.v); $('#mNome').value = m.n; $('#mP').value = m.p; $('#mC').value = m.c; $('#mG').value = m.g; $('#mP').dispatchEvent(new Event('input')); },
   delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
+  outraFrase: () => {
+    const q = $('#fraseTxt'), card = $('#fraseCard');
+    const swap = () => { ui.fraseOff = (ui.fraseOff || 0) + 1; const tmp = document.createElement('div'); tmp.innerHTML = cardFrase(); card.replaceWith(tmp.firstElementChild); const n = $('#fraseTxt'); if (n && !RM.matches) n.animate([{opacity:0, transform:'translateY(8px)', filter:'blur(4px)'}, {opacity:1, transform:'none', filter:'blur(0)'}], {duration: 460, easing: 'cubic-bezier(.22,.8,.24,1)'}); };
+    if (RM.matches || !q) return swap();
+    q.animate([{opacity:1}, {opacity:0, transform:'translateY(-6px)', filter:'blur(4px)'}], {duration: 200, easing: 'ease-in'}).onfinish = swap;
+  },
+  genero: el => { S.prefs = Object.assign({}, S.prefs, {genero: el.dataset.v}); save('prefs'); if ($('#sheetWrap').classList.contains('open')) { el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); } render(false); toast(el.dataset.v === 'f' ? 'Frases no feminino' : 'Frases no masculino'); },
   divMacro: el => { const k = el.dataset.v; $('#gDiv').value = k; markSeg(k); if (DIVISOES[k]) { ['gPp','gPc','gPg'].forEach((id, i) => $('#' + id).value = DIVISOES[k][i + 1]); } $('#gKcal').dispatchEvent(new Event('input')); },
   novoLivro: () => sheetLivro(null), editLivro: el => sheetLivro(find(S.livros.items, el.dataset.id)),
   delLivro: el => { S.livros.items = S.livros.items.filter(r => r.id !== el.dataset.id); save('livros'); closeSheet(); render(false); toast('Livro excluído'); },

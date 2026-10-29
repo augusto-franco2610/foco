@@ -294,3 +294,15 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
   *,*::before,*::after{animation-duration:1ms!important;animation-delay:0ms!important;transition-duration:1ms!important;transition-delay:0ms!important}
 }
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* card de frases */
+.frase{position:relative;overflow:hidden;display:grid;gap:12px}
+.frase::before{content:"\201D";position:absolute;right:14px;bottom:-62px;font-size:120px;line-height:1;font-family:Georgia,"Times New Roman",serif;color:var(--accent);opacity:.12;pointer-events:none}
+.frase-tag{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;border-radius:999px}
+.frase-tag.est{background:var(--warn-soft);color:var(--warn)}
+.frase-tag.mot{background:var(--accent-soft);color:var(--accent)}
+.frase-txt{margin:0;display:grid;gap:8px}
+.frase-txt p{margin:0;font-size:20px;line-height:1.35;font-weight:600;letter-spacing:-.01em;text-wrap:pretty}
+.frase-txt cite{font-style:normal;font-size:14px;color:var(--fg2);font-weight:500}
+.frase-txt cite::before{content:"— "}
+.frase-gen{display:grid;gap:8px;padding-top:10px;border-top:1px solid var(--line)}
