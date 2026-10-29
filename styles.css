@@ -327,3 +327,11 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .inp{min-width:0;max-width:100%}
 .sheet-b{overflow-x:hidden}
 .field{min-width:0}
+
+/* livros */
+.capa{border-radius:6px;object-fit:cover;flex:none;background:var(--surface2);box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.capa.vazia{display:grid;place-items:center;color:var(--fg2)}
+.capa.vazia svg{width:40%;height:auto}
+.livro-info{display:flex;gap:14px;align-items:flex-start;background:var(--surface)}
+.sinopse{margin:4px 0 0;color:var(--fg2);display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.livro-res .t{font-weight:500}

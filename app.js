@@ -750,11 +750,12 @@ function estLeitura(){
   <section class="card tap rv" data-act="metas"><div class="hero">${ring(meta ? lid / meta : 0, 96, 10, 'livros', 'var(--accent)', `<div><b class="num" data-count="${lid}" data-k="la">0</b><span>de ${meta}</span></div>`)}
     <div class="hero-txt"><div class="muted small">Meta de ${ano}</div><div class="big">${lid === 1 ? '1 livro lido' : lid + ' livros lidos'}</div><div class="small muted"><span class="num" data-count="${pag30}" data-k="p30">0</span> páginas nos últimos 30 dias</div></div></div></section>
   ${ativos.length ? ativos.map(l => { const pc = l.paginas ? l.lidas / l.paginas : 0;
-    return `<section class="card rv" data-flip="l${l.id}"><div class="sec-row" style="align-items:flex-start"><button class="grow rowbtn" data-act="editLivro" data-id="${l.id}" style="display:block"><div style="font-size:17px;font-weight:600">${esc(l.titulo)}</div><div class="small muted">${esc(l.autor || '')}${l.prazo ? ' · até ' + ddmm(l.prazo) : ''}</div></button><b class="num" style="font-size:20px">${fmt(pc * 100)}%</b></div>
-      <div style="margin:12px 0 6px">${hbar(pc, 'lb' + l.id)}</div><div class="small muted num">${fmt(l.lidas)} de ${fmt(l.paginas)} páginas</div>
-      <div class="btnrow" style="margin-top:12px"><button class="mini" data-act="pag" data-id="${l.id}" data-v="10">+10 pág.</button><button class="mini" data-act="pag" data-id="${l.id}" data-v="25">+25 pág.</button><button class="mini" data-act="pagCustom" data-id="${l.id}">Outro valor</button></div></section>`; }).join('')
+    return `<section class="card rv livro" data-flip="l${l.id}"><button class="rowbtn" data-act="editLivro" data-id="${l.id}" style="align-items:flex-start">${capaHTML(l, 64)}<div class="grow" style="min-width:0"><div style="font-size:17px;font-weight:600">${esc(l.titulo)}</div><div class="small muted">${esc(l.autor || '')}${l.prazo ? ' · até ' + ddmm(l.prazo) : ''}</div>
+        <div class="small muted num" style="margin-top:6px">${fmt(l.lidas)} de ${fmt(l.paginas)} páginas${l.capitulos ? ` · cap. ${l.capLidos || 0} de ${l.capitulos}` : ''}</div></div><b class="num" style="font-size:20px">${fmt(pc * 100)}%</b></button>
+      <div style="margin:12px 0 0">${hbar(pc, 'lb' + l.id)}</div>
+      <div class="btnrow" style="margin-top:12px">${l.capitulos ? `<button class="mini" data-act="cap" data-id="${l.id}">+1 capítulo</button>` : ''}<button class="mini" data-act="pag" data-id="${l.id}" data-v="10">+10 pág.</button><button class="mini" data-act="pag" data-id="${l.id}" data-v="25">+25 pág.</button><button class="mini" data-act="pagCustom" data-id="${l.id}">Outro valor</button></div></section>`; }).join('')
     : `<section class="card rv">${empty('book', 'Nenhum livro em andamento', 'Adicione o livro com o total de páginas e acompanhe o progresso.', `<button class="btn pri" data-act="novoLivro">${ic('plus','s')}Novo livro</button>`)}</section>`}
-  ${feitos.length ? `<section class="card rv"><h2>Concluídos</h2><div class="list">${feitos.map(l => `<button class="row rowbtn" data-act="editLivro" data-id="${l.id}"><span class="check on"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span><div class="grow"><div class="t">${esc(l.titulo)}</div><div class="s">${esc(l.autor || '')} · ${ddmm(l.concluidoEm)}/${l.concluidoEm.slice(2,4)}</div></div></button>`).join('')}</div></section>` : ''}`;
+  ${feitos.length ? `<section class="card rv"><h2>Concluídos</h2><div class="list">${feitos.map(l => `<button class="row rowbtn" data-act="editLivro" data-id="${l.id}">${l.capa ? capaHTML(l, 36) : '<span class="check on"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>'}<div class="grow"><div class="t">${esc(l.titulo)}</div><div class="s">${esc(l.autor || '')} · ${ddmm(l.concluidoEm)}/${l.concluidoEm.slice(2,4)}</div></div></button>`).join('')}</div></section>` : ''}`;
 }
 function estCursos(){
   const items = S.cursos.items;
@@ -1080,16 +1081,59 @@ function sheetMetas(){
   upd();
 }
 function markSeg(k){ const sg = document.querySelector('#sheetBody .seg'); if (!sg) return; sg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === k)); placeThumb(sg); }
+let livroInfo = null, livroRes = [];
+const capaUrl = u => u ? u.replace(/^http:/, 'https:').replace('&edge=curl', '') : '';
+function capaHTML(l, w){ const h = Math.round(w * 1.5); return l.capa ? `<img class="capa" src="${esc(l.capa)}" alt="" width="${w}" height="${h}" loading="lazy" referrerpolicy="no-referrer" style="width:${w}px;height:${h}px">` : `<span class="capa vazia" style="width:${w}px;height:${h}px">${ic('book')}</span>`; }
+async function buscarLivros(q){
+  const u = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(q) + '&maxResults=8&printType=books&langRestrict=pt';
+  const r = await fetch(u); if (!r.ok) throw new Error('busca indisponível');
+  const j = await r.json();
+  return (j.items || []).map(i => { const v = i.volumeInfo || {}; const ids = v.industryIdentifiers || [];
+    return {titulo: v.title + (v.subtitle ? ': ' + v.subtitle : ''), autor: (v.authors || []).join(', '), paginas: v.pageCount || 0, capa: capaUrl((v.imageLinks || {}).thumbnail || (v.imageLinks || {}).smallThumbnail),
+      editora: v.publisher || '', ano: (v.publishedDate || '').slice(0, 4), sinopse: (v.description || '').replace(/<[^>]+>/g, ''), categorias: (v.categories || []).join(', '),
+      isbn: ((ids.find(x => x.type === 'ISBN_13') || ids.find(x => x.type === 'ISBN_10')) || {}).identifier || '', gid: i.id}; });
+}
+async function capitulosDe(isbn){
+  if (!isbn) return 0;
+  try { const r = await fetch('https://openlibrary.org/isbn/' + isbn + '.json'); if (!r.ok) return 0; const j = await r.json();
+    const toc = (j.table_of_contents || []).filter(t => (t.level || 0) === 0 && (t.title || t.label));
+    const caps = toc.filter(t => /cap[ií]tulo|chapter|^\d+[\.\s]/i.test((t.label || '') + ' ' + (t.title || '')));
+    return caps.length >= 3 ? caps.length : toc.length >= 3 ? toc.length : 0; } catch(e) { return 0; }
+}
 function sheetLivro(l){
-  const novo = !l; l = l || {titulo:'', autor:'', paginas:'', lidas:0, prazo:''};
+  const novo = !l; l = l || {titulo:'', autor:'', paginas:'', lidas:0, prazo:'', capitulos:'', capLidos:0};
+  livroInfo = novo ? null : {capa: l.capa, editora: l.editora, ano: l.ano, sinopse: l.sinopse, isbn: l.isbn, categorias: l.categorias};
   openSheet(novo ? 'Novo livro' : 'Editar livro', `<form class="form" data-form="livro" data-id="${l.id || ''}">
-    <div class="field"><label for="bT">Título</label><input class="inp" id="bT" value="${esc(l.titulo)}" required autofocus></div>
+    <div class="field"><label for="bT">Título</label><input class="inp" id="bT" value="${esc(l.titulo)}" required ${novo ? 'autofocus' : ''} autocomplete="off" placeholder="Digite o nome do livro"><div class="list" id="bRes"></div><span class="small muted" id="bStatus"></span></div>
+    <div id="bInfo">${novo ? '' : livroCard(l)}</div>
     <div class="field"><label for="bA">Autor</label><input class="inp" id="bA" value="${esc(l.autor)}"></div>
     <div class="f2"><div class="field"><label for="bP">Total de páginas</label><input class="inp num" id="bP" type="number" inputmode="numeric" min="1" value="${l.paginas}" required></div>
       <div class="field"><label for="bL">Páginas lidas</label><input class="inp num" id="bL" type="number" inputmode="numeric" min="0" value="${l.lidas}"></div></div>
+    <div class="f2"><div class="field"><label for="bC">Capítulos</label><input class="inp num" id="bC" type="number" inputmode="numeric" min="0" value="${l.capitulos || ''}" placeholder="Opcional"></div>
+      <div class="field"><label for="bCL">Capítulos lidos</label><input class="inp num" id="bCL" type="number" inputmode="numeric" min="0" value="${l.capLidos || 0}"></div></div>
     <div class="field"><label for="bD">Terminar até</label><input class="inp" id="bD" type="date" value="${l.prazo || ''}"></div>
     <button class="btn pri wide">Salvar livro</button>
     ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir livro</button>${confirmBox('Excluir este livro?', 'delLivro', l.id)}` : ''}</form>`);
+  const t = $('#bT'); let tmr, seq = 0;
+  t.addEventListener('input', () => {
+    clearTimeout(tmr); const q = t.value.trim();
+    if (q.length < 3) { $('#bRes').innerHTML = ''; $('#bStatus').textContent = ''; return; }
+    $('#bStatus').textContent = 'Buscando…';
+    tmr = setTimeout(async () => {
+      const my = ++seq;
+      try { livroRes = await buscarLivros(q); } catch(e) { livroRes = []; if (my === seq) $('#bStatus').textContent = 'Não deu para buscar agora. Preencha os dados à mão.'; return; }
+      if (my !== seq) return;
+      $('#bStatus').textContent = livroRes.length ? 'Toque no livro certo para preencher' : 'Nenhum livro encontrado. Preencha à mão.';
+      $('#bRes').innerHTML = livroRes.map((b, i) => `<button type="button" class="row rowbtn livro-res" data-act="pickLivro" data-v="${i}">${capaHTML(b, 40)}<span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(b.titulo)}</span><span class="s">${esc([b.autor, b.ano, b.paginas ? b.paginas + ' pág.' : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('');
+    }, 380);
+  });
+}
+function livroCard(b){
+  if (!b || !(b.capa || b.sinopse || b.editora)) return '';
+  return `<div class="card livro-info" style="box-shadow:none">${capaHTML(b, 84)}<div class="grow" style="min-width:0;display:grid;gap:4px">
+    <b>${esc(b.titulo || '')}</b><span class="small muted">${esc([b.autor, b.editora, b.ano].filter(Boolean).join(' · '))}</span>
+    ${b.categorias ? `<span class="small muted">${esc(b.categorias)}</span>` : ''}
+    ${b.sinopse ? `<p class="small sinopse">${esc(b.sinopse)}</p>` : ''}</div></div>`;
 }
 function sheetCurso(c){
   const novo = !c; c = c || {nome:'', plataforma:'', prazo:'', etapas:[]};
@@ -1234,7 +1278,24 @@ const ACT = {
   },
   genero: el => { S.prefs = Object.assign({}, S.prefs, {genero: el.dataset.v}); save('prefs'); if ($('#sheetWrap').classList.contains('open')) { el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); } render(false); toast(el.dataset.v === 'f' ? 'Frases no feminino' : 'Frases no masculino'); },
   divMacro: el => { const k = el.dataset.v; $('#gDiv').value = k; markSeg(k); if (DIVISOES[k]) { ['gPp','gPc','gPg'].forEach((id, i) => $('#' + id).value = DIVISOES[k][i + 1]); } $('#gKcal').dispatchEvent(new Event('input')); },
-  novoLivro: () => sheetLivro(null), editLivro: el => sheetLivro(find(S.livros.items, el.dataset.id)),
+  novoLivro: () => sheetLivro(null),
+  pickLivro: async el => {
+    const b = livroRes[+el.dataset.v]; if (!b) return;
+    livroInfo = {capa: b.capa, editora: b.editora, ano: b.ano, sinopse: b.sinopse, isbn: b.isbn, categorias: b.categorias};
+    $('#bT').value = b.titulo; $('#bA').value = b.autor; if (b.paginas) $('#bP').value = b.paginas;
+    $('#bRes').innerHTML = ''; $('#bInfo').innerHTML = livroCard(b);
+    const card = $('#bInfo').firstElementChild; if (card && !RM.matches) card.animate([{opacity:0, transform:'scale(.97)'}, {opacity:1, transform:'none'}], {duration: 380, easing: 'cubic-bezier(.22,.8,.24,1)'});
+    $('#bStatus').textContent = b.isbn ? 'Procurando o número de capítulos…' : 'Capítulos não informados por essa edição. Preencha se quiser.';
+    const n = await capitulosDe(b.isbn);
+    if (n) { $('#bC').value = n; $('#bStatus').textContent = `${n} capítulos encontrados no sumário. Confira e ajuste se precisar.`; }
+    else if (b.isbn) $('#bStatus').textContent = 'O sumário dessa edição não está disponível. Preencha os capítulos se quiser.';
+    if (!b.paginas) $('#bP').focus();
+  },
+  cap: el => { const l = find(S.livros.items, el.dataset.id); if (!l || !l.capitulos) return;
+    const antes = l.capLidos || 0; l.capLidos = Math.min(l.capitulos, antes + 1);
+    const alvo = Math.round(l.paginas * l.capLidos / l.capitulos);
+    if (alvo > l.lidas) addPages(l.id, 0, alvo); else { save('livros'); render(false); }
+    toast(l.capLidos >= l.capitulos ? 'Último capítulo lido' : `Capítulo ${l.capLidos} de ${l.capitulos}`); }, editLivro: el => sheetLivro(find(S.livros.items, el.dataset.id)),
   delLivro: el => { S.livros.items = S.livros.items.filter(r => r.id !== el.dataset.id); save('livros'); closeSheet(); render(false); toast('Livro excluído'); },
   pag: el => addPages(el.dataset.id, +el.dataset.v),
   pagCustom: el => {
@@ -1317,7 +1378,8 @@ const FORMS = {
   },
   livro: f => {
     const id = f.dataset.id, l = id ? find(S.livros.items, id) : {id: uid(), criado: today()};
-    Object.assign(l, {titulo: val('bT'), autor: val('bA'), paginas: Math.max(1, Math.round(num('bP'))), lidas: Math.round(num('bL')), prazo: val('bD')});
+    Object.assign(l, {titulo: val('bT'), autor: val('bA'), paginas: Math.max(1, Math.round(num('bP'))), lidas: Math.round(num('bL')), prazo: val('bD'), capitulos: Math.round(num('bC')) || 0, capLidos: Math.round(num('bCL')) || 0}, Object.fromEntries(Object.entries(livroInfo || {}).filter(([, v]) => v != null && v !== '')));
+    l.capLidos = Math.min(l.capLidos, l.capitulos || l.capLidos);
     l.lidas = Math.min(l.lidas, l.paginas); if (l.lidas >= l.paginas && !l.concluidoEm) l.concluidoEm = today(); if (l.lidas < l.paginas) l.concluidoEm = null;
     if (!id) S.livros.items.push(l); save('livros'); closeSheet(); render(false); toast('Livro salvo');
   },
