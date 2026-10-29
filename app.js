@@ -108,46 +108,55 @@ const findCli = id => CLI().find(c => c.id === id);
 const CAMPOS_CLI = ['nome','fone','produtoId','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','criado'];
 function snapCliente(c){ const o = {}; CAMPOS_CLI.forEach(k => { if (c[k] !== undefined) o[k] = c[k]; }); o.produtoNome = P(c.produtoId).nome; o.corretorNome = c._recebido ? (c.corretorNome || '') : B(c.corretorId).nome; return o; }
 async function pushShare(c){
-  const sid = c._recebido ? c._share : c.shareId; if (!sid || !fdb) return;
+  const sid = c._recebido ? c._share : c.shareId; if (!sid || !fdb || c._soLeitura) return;
   const upd = {cliente: snapCliente(c), atualizado: Date.now(), atualizadoPor: me.uid};
   if (c._recebido) upd['cal.' + me.uid] = c.calEventId || null;
-  try { await fdb.doc('compartilhados/' + sid).update(upd); } catch(e) { toast('Salvo, mas não deu para atualizar o compartilhamento: ' + e.message, true); }
+  try { await refShare(sid).update(upd); } catch(e) { toast('Salvo, mas não deu para atualizar o compartilhamento: ' + e.message, true); }
 }
 function salvarCli(c){ if (!c._recebido) save('clientes'); pushShare(c); }
-let unsubSh = null;
+/* Duas formas de guardar o compartilhamento:
+   - "compartilhados/{id}" (membros: dono e parceiros editam) quando as regras do banco já permitem;
+   - "atendimentos/{id}" com tipo "cliente" (já liberado hoje: o dono edita, o parceiro acompanha). */
+let unsubSh = null, docsC = [], docsA = [];
+const refShare = sid => sid.startsWith('a:') ? fdb.doc('atendimentos/' + sid.slice(2)) : fdb.doc('compartilhados/' + sid);
+function reconstruirShares(){
+  const novos = [], mapa = {}; sharesMeus = {}; let mudouLocal = false;
+  const todos = docsC.map(x => Object.assign({}, x, {sid: x.id})).concat(docsA.map(x => Object.assign({}, x, {sid: 'a:' + x.id, dono: x.criadoPor, membros: x.participantes || [], soLeitura: true})));
+  todos.forEach(x => {
+    if (!x.cliente) return;
+    if (x.dono === me.uid) {
+      sharesMeus[x.sid] = x;
+      const c = S.clientes.find(k => k.shareId === x.sid);
+      if (c && x.atualizadoPor !== me.uid && (x.atualizado || 0) > (c.shareSync || 0)) {
+        CAMPOS_CLI.forEach(k => { if (k !== 'criado' && x.cliente[k] !== undefined) c[k] = x.cliente[k]; }); c.shareSync = x.atualizado; mudouLocal = true;
+      }
+    } else {
+      mapa[x.sid] = x;
+      const p = S.produtos.find(z => z.id === x.cliente.produtoId) || S.produtos.find(z => normNome(z.nome) === normNome(x.cliente.produtoNome || ''));
+      novos.push(Object.assign({}, x.cliente, {id: 'sh' + x.sid.replace(':', '_'), _recebido: true, _share: x.sid, _soLeitura: !!x.soLeitura, _dono: x.dono, corretorId: 'sh-' + x.sid, corretorNome: x.cliente.corretorNome, produtoId: p ? p.id : '', calEventId: (x.cal || {})[me.uid] || null}));
+    }
+  });
+  recebidos = novos; recebidosMap = mapa;
+  loadPeople([...new Set(todos.flatMap(x => x.membros || []))]).then(() => { if (!$('#sheetWrap').classList.contains('open')) render(false); });
+  if (mudouLocal) save('clientes');
+}
 function watchCompartilhados(){
   if (unsubSh) unsubSh();
-  unsubSh = fdb.collection('compartilhados').where('membros', 'array-contains', me.uid).onSnapshot(qs => {
-    const novos = [], mapa = {}; sharesMeus = {}; let mudouLocal = false;
-    qs.docs.forEach(d => {
-      const x = d.data(); x.id = d.id;
-      if (x.dono === me.uid) {
-        sharesMeus[x.id] = x;
-        const c = S.clientes.find(k => k.shareId === x.id);
-        if (c && x.atualizadoPor !== me.uid && (x.atualizado || 0) > (c.shareSync || 0)) {
-          CAMPOS_CLI.forEach(k => { if (k !== 'criado' && x.cliente[k] !== undefined) c[k] = x.cliente[k]; }); c.shareSync = x.atualizado; mudouLocal = true;
-        }
-      } else {
-        mapa[x.id] = x;
-        const p = S.produtos.find(z => z.id === x.cliente.produtoId) || S.produtos.find(z => normNome(z.nome) === normNome(x.cliente.produtoNome || ''));
-        novos.push(Object.assign({}, x.cliente, {id: 'sh' + x.id, _recebido: true, _share: x.id, _dono: x.dono, corretorId: 'sh-' + x.id, corretorNome: x.cliente.corretorNome, produtoId: p ? p.id : '', calEventId: (x.cal || {})[me.uid] || null}));
-      }
-    });
-    recebidos = novos; recebidosMap = mapa;
-    loadPeople([...new Set(qs.docs.flatMap(d => d.data().membros || []))]).then(() => { if (!$('#sheetWrap').classList.contains('open')) render(false); });
-    if (mudouLocal) save('clientes');
-  }, () => {});
+  unsubSh = fdb.collection('compartilhados').where('membros', 'array-contains', me.uid).onSnapshot(qs => { docsC = qs.docs.map(d => Object.assign({id: d.id}, d.data())); reconstruirShares(); }, () => { docsC = []; });
 }
 async function compartilharCliente(c, uids){
   uids = [...new Set(uids)].filter(u => u !== me.uid);
+  const base = {cliente: snapCliente(c), atualizado: Date.now(), atualizadoPor: me.uid};
   if (!c.shareId) {
     if (!uids.length) return;
-    const ref = await fdb.collection('compartilhados').add({dono: me.uid, membros: [me.uid, ...uids], cliente: snapCliente(c), cal: {}, criado: Date.now(), atualizado: Date.now(), atualizadoPor: me.uid});
-    c.shareId = ref.id; c.shareSync = Date.now(); save('clientes');
+    try { const ref = await fdb.collection('compartilhados').add(Object.assign({dono: me.uid, membros: [me.uid, ...uids], cal: {}, criado: Date.now()}, base)); c.shareId = ref.id; }
+    catch(e) { if (e.code !== 'permission-denied') throw e;
+      const ref = await fdb.collection('atendimentos').add(Object.assign({tipo: 'cliente', titulo: 'Cliente compartilhado', criadoPor: me.uid, participantes: [me.uid, ...uids], status: 'ativo', criado: Date.now()}, base)); c.shareId = 'a:' + ref.id; }
+    c.shareSync = Date.now(); save('clientes');
   } else if (!uids.length) {
-    await fdb.doc('compartilhados/' + c.shareId).delete(); delete c.shareId; save('clientes');
+    await refShare(c.shareId).delete(); delete c.shareId; save('clientes');
   } else {
-    await fdb.doc('compartilhados/' + c.shareId).update({membros: [me.uid, ...uids], cliente: snapCliente(c), atualizado: Date.now(), atualizadoPor: me.uid});
+    await refShare(c.shareId).update(Object.assign(c.shareId.startsWith('a:') ? {participantes: [me.uid, ...uids]} : {membros: [me.uid, ...uids]}, base));
   }
 }
 
@@ -200,7 +209,7 @@ function watchAtendimentos(){
   if (unsubAt) unsubAt();
   unsubAt = fdb.collection('atendimentos').where('participantes', 'array-contains', me.uid)
     .onSnapshot(qs => {
-      atend = qs.docs.map(d => ({id: d.id, ...d.data()})); agendarFila();
+      const tudo = qs.docs.map(d => ({id: d.id, ...d.data()})); atend = tudo.filter(x => x.tipo !== 'cliente'); docsA = tudo.filter(x => x.tipo === 'cliente'); reconstruirShares(); agendarFila();
       const ids = new Set(); atend.forEach(a => (a.participantes||[]).forEach(u => ids.add(u)));
       loadPeople([...ids]).then(() => { if (!$('#sheetWrap').classList.contains('open') || ui.tab !== 'agenda') render(false); else render(false); });
     }, () => {});
@@ -965,7 +974,7 @@ const confirmBox = (msg, act, id) => `<div class="confirm" id="cfm" hidden><b>${
 
 function blocoShare(c){
   if (c._recebido) { const dono = people[c._dono] || {};
-    return `<div class="card share-info" style="box-shadow:none">${face(c._dono)}<div class="grow small"><b>Compartilhado por ${esc(dono.nome || dono.email || 'um parceiro')}</b><div class="muted">Suas alterações de etapa, retornos e anotações aparecem para ele também.</div></div></div>`; }
+    return `<div class="card share-info" style="box-shadow:none">${face(c._dono)}<div class="grow small"><b>Compartilhado por ${esc(dono.nome || dono.email || 'um parceiro')}</b><div class="muted">${c._soLeitura ? 'Você acompanha este cliente. Só quem compartilhou altera a ficha; fale com ele para atualizar.' : 'Suas alterações de etapa, retornos e anotações aparecem para ele também.'}</div></div></div>`; }
   const sh = c.shareId && sharesMeus[c.shareId], outros = sh ? sh.membros.filter(u => u !== me.uid) : [];
   return `<div class="card" style="box-shadow:none;display:grid;gap:10px">
     <div class="sec-row"><b>Compartilhar</b>${outros.length ? `<div class="faces">${outros.map(face).join('')}</div>` : ''}</div>
@@ -1000,6 +1009,8 @@ function sheetCliente(c){
     ${!novo ? (c._recebido ? `<button type="button" class="btn dan wide" data-act="askDel">Parar de acompanhar</button>${confirmBox('Parar de acompanhar ' + esc(c.nome) + '? O cliente continua com quem compartilhou.', 'delCliente', c.id)}`
       : `<button type="button" class="btn dan wide" data-act="askDel">${ic('trash','s')}Excluir cliente</button>${confirmBox('Excluir ' + esc(c.nome) + '? Isso não pode ser desfeito' + (c.shareId ? ' e some também para quem você compartilhou' : '') + '.', 'delCliente', c.id)}`) : ''}
   </form>`);
+  if (c._soLeitura) { const f = $('#sheetBody form'); f.querySelectorAll('input,select,textarea').forEach(x => x.disabled = true);
+    f.querySelectorAll('[data-act=contato],[data-act=avancar],[data-act=visitaToggle],[data-act=visitaFeita],#cSave,#cCal').forEach(x => x.closest('.switch') ? x.closest('.switch').remove() : x.remove()); }
 }
 const TIPOS_VISITA = ['Visita ao decorado','Visita ao imóvel','Visita ao stand','Visita à obra'];
 const visitasDe = c => c && c.id ? atend.filter(a => a.clienteId === c.id && a.status !== 'cancelado').sort(byKey('inicio')) : [];
@@ -1464,15 +1475,15 @@ const ACT = {
   askDel: () => { const c = $('#cfm'); if (c) { c.hidden = false; c.scrollIntoView({behavior: RM.matches ? 'auto' : 'smooth', block: 'center'}); c.animate && c.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 260}); } },
   cfmNo: () => { const c = $('#cfm'); if (c) c.hidden = true; },
   delCliente: async el => { const c = findCli(el.dataset.id); if (!c) return; if (c.calEventId && hasTok()) { try { await cal('calendars/primary/events/' + c.calEventId, {method:'DELETE'}); } catch(e) {} }
-    if (c._recebido) { try { await fdb.doc('compartilhados/' + c._share).update({membros: firebase.firestore.FieldValue.arrayRemove(me.uid)}); } catch(e) { return toast('Não deu para sair: ' + e.message, true); } closeSheet(); toast('Você não acompanha mais ' + c.nome); return; }
-    if (c.shareId) { try { await fdb.doc('compartilhados/' + c.shareId).delete(); } catch(e) {} }
+    if (c._recebido) { try { await refShare(c._share).update({[c._share.startsWith('a:') ? 'participantes' : 'membros']: firebase.firestore.FieldValue.arrayRemove(me.uid)}); } catch(e) { return toast('Não deu para sair: ' + e.message, true); } closeSheet(); toast('Você não acompanha mais ' + c.nome); return; }
+    if (c.shareId) { try { await refShare(c.shareId).delete(); } catch(e) {} }
     S.clientes = S.clientes.filter(x => x.id !== el.dataset.id); save('clientes'); closeSheet(); render(false); toast('Cliente excluído'); },
   shareSalvar: async el => {
     const c = findCli(el.dataset.id); if (!c) return;
     const uids = [...document.querySelectorAll('#shPeople .chip.on')].map(b => b.dataset.v);
     el.disabled = true; el.innerHTML = '<span class="spin"></span>Salvando';
     try { await compartilharCliente(c, uids); toast(uids.length ? `${c.nome} compartilhado com ${uids.length} ${uids.length === 1 ? 'pessoa' : 'pessoas'}` : 'Compartilhamento removido'); closeSheet(); render(false); }
-    catch(e) { el.disabled = false; el.textContent = 'Salvar compartilhamento'; toast(e.code === 'permission-denied' ? 'O compartilhamento ainda está sendo liberado no servidor. Tente de novo mais tarde.' : 'Não deu para compartilhar: ' + e.message, true); }
+    catch(e) { el.disabled = false; el.textContent = 'Salvar compartilhamento'; toast('Não deu para compartilhar: ' + e.message, true); }
   },
   shareAbrir: async () => {
     const box = $('#shBox'); box.hidden = !box.hidden; if (box.hidden) return;
