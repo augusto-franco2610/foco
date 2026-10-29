@@ -1083,15 +1083,35 @@ function sheetMetas(){
 function markSeg(k){ const sg = document.querySelector('#sheetBody .seg'); if (!sg) return; sg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === k)); placeThumb(sg); }
 let livroInfo = null, livroRes = [];
 const capaUrl = u => u ? u.replace(/^http:/, 'https:').replace('&edge=curl', '') : '';
-function capaHTML(l, w){ const h = Math.round(w * 1.5); return l.capa ? `<img class="capa" src="${esc(l.capa)}" alt="" width="${w}" height="${h}" loading="lazy" referrerpolicy="no-referrer" style="width:${w}px;height:${h}px">` : `<span class="capa vazia" style="width:${w}px;height:${h}px">${ic('book')}</span>`; }
-async function buscarLivros(q){
-  const u = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(q) + '&maxResults=8&printType=books&langRestrict=pt';
-  const r = await fetch(u); if (!r.ok) throw new Error('busca indisponível');
+function capaHTML(l, w){ const h = Math.round(w * 1.5); return l.capa ? `<img class="capa" src="${esc(l.capa)}" alt="" width="${w}" height="${h}" loading="lazy" referrerpolicy="no-referrer" style="width:${w}px;height:${h}px" onerror="this.outerHTML='<span class=&quot;capa vazia&quot; style=&quot;width:${w}px;height:${h}px&quot;></span>'">` : `<span class="capa vazia" style="width:${w}px;height:${h}px">${ic('book')}</span>`; }
+const comTempo = (u, ms = 8000) => { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms); return fetch(u, {signal: c.signal}).finally(() => clearTimeout(t)); };
+async function livrosGoogle(q, pt){
+  const u = 'https://www.googleapis.com/books/v1/volumes?q=' + encodeURIComponent(q) + '&maxResults=8&printType=books' + (pt ? '&langRestrict=pt' : '');
+  const r = await comTempo(u); if (!r.ok) throw new Error('google ' + r.status);
   const j = await r.json();
   return (j.items || []).map(i => { const v = i.volumeInfo || {}; const ids = v.industryIdentifiers || [];
     return {titulo: v.title + (v.subtitle ? ': ' + v.subtitle : ''), autor: (v.authors || []).join(', '), paginas: v.pageCount || 0, capa: capaUrl((v.imageLinks || {}).thumbnail || (v.imageLinks || {}).smallThumbnail),
       editora: v.publisher || '', ano: (v.publishedDate || '').slice(0, 4), sinopse: (v.description || '').replace(/<[^>]+>/g, ''), categorias: (v.categories || []).join(', '),
-      isbn: ((ids.find(x => x.type === 'ISBN_13') || ids.find(x => x.type === 'ISBN_10')) || {}).identifier || '', gid: i.id}; });
+      isbn: ((ids.find(x => x.type === 'ISBN_13') || ids.find(x => x.type === 'ISBN_10')) || {}).identifier || ''}; });
+}
+async function livrosOpenLibrary(q){
+  const u = 'https://openlibrary.org/search.json?q=' + encodeURIComponent(q) + '&limit=8&fields=title,subtitle,author_name,first_publish_year,number_of_pages_median,cover_i,isbn,publisher,subject,language';
+  const r = await comTempo(u, 10000); if (!r.ok) throw new Error('openlibrary ' + r.status);
+  const j = await r.json();
+  return (j.docs || []).sort((x, y) => ((y.language || []).includes('por') ? 1 : 0) - ((x.language || []).includes('por') ? 1 : 0)).map(d => {
+    const isbn = (d.isbn || []).find(x => x.length === 13 && /^97[89]65|^97[89]85/.test(x)) || (d.isbn || []).find(x => x.length === 13) || (d.isbn || [])[0] || '';
+    return {titulo: d.title + (d.subtitle ? ': ' + d.subtitle : ''), autor: (d.author_name || []).slice(0, 3).join(', '), paginas: d.number_of_pages_median || 0,
+      capa: d.cover_i ? 'https://covers.openlibrary.org/b/id/' + d.cover_i + '-M.jpg' : '', editora: (d.publisher || [])[0] || '', ano: d.first_publish_year ? String(d.first_publish_year) : '',
+      sinopse: '', categorias: (d.subject || []).slice(0, 3).join(', '), isbn}; });
+}
+async function buscarLivros(q){
+  const tentativas = [() => livrosGoogle(q, true), () => livrosGoogle(q, false), () => livrosOpenLibrary(q)];
+  let ultimoErro = null, vazio = false;
+  for (const t of tentativas) {
+    try { const r = await t(); if (r.length) return r; vazio = true; } catch(e) { ultimoErro = e; }
+  }
+  if (vazio) return [];
+  throw ultimoErro || new Error('sem resposta');
 }
 async function capitulosDe(isbn){
   if (!isbn) return 0;
@@ -1121,7 +1141,7 @@ function sheetLivro(l){
     $('#bStatus').textContent = 'Buscando…';
     tmr = setTimeout(async () => {
       const my = ++seq;
-      try { livroRes = await buscarLivros(q); } catch(e) { livroRes = []; if (my === seq) $('#bStatus').textContent = 'Não deu para buscar agora. Preencha os dados à mão.'; return; }
+      try { livroRes = await buscarLivros(q); } catch(e) { livroRes = []; if (my === seq) $('#bStatus').textContent = navigator.onLine === false ? 'Sem internet. Preencha os dados à mão.' : 'As bases de livros não responderam. Tente de novo em instantes ou preencha à mão.'; console.warn('busca de livros', e); return; }
       if (my !== seq) return;
       $('#bStatus').textContent = livroRes.length ? 'Toque no livro certo para preencher' : 'Nenhum livro encontrado. Preencha à mão.';
       $('#bRes').innerHTML = livroRes.map((b, i) => `<button type="button" class="row rowbtn livro-res" data-act="pickLivro" data-v="${i}">${capaHTML(b, 40)}<span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(b.titulo)}</span><span class="s">${esc([b.autor, b.ano, b.paginas ? b.paginas + ' pág.' : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('');
