@@ -531,7 +531,8 @@ const ALIMENTOS = [
   ['Cenoura crua',34,1.3,7.7,0.2,'porção',50],['Abobrinha refogada',25,1.1,4.0,0.6,'porção',80],
   ['Café sem açúcar',2,0.2,0.3,0,'xícara',50],['Suco de laranja natural',33,0.7,7.6,0.1,'copo (250 ml)',250],
   ['Bolinho de feijoada, frito',261,9.8,25.4,14.1,'unidade',35],['Bolinho de cupim, frito',269,11.1,21.7,15.4,'unidade',35],
-  ['Refrigerante comum',41,0,10.4,0,'lata (350 ml)',350],['Cerveja pilsen',41,0.6,3.3,0,'lata (350 ml)',350]
+  ['Refrigerante comum',41,0,10.4,0,'lata (350 ml)',350],['Cerveja pilsen',41,0.6,3.3,0,'lata (350 ml)',350],
+  ['Cerveja Brahma, 4,8%',41,0.4,3.2,0,'lata (350 ml)',350],['Cerveja Brahma Duplo Malte, 4,7%',41,0.4,3.4,0,'lata (350 ml)',350],['Cerveja Skol, 4,7%',39,0.4,2.9,0,'lata (350 ml)',350],['Cerveja Antarctica Pilsen, 4,7%',41,0.4,3.3,0,'lata (350 ml)',350],['Cerveja Original, 4,9%',43,0.4,3.6,0,'lata (350 ml)',350],['Cerveja Itaipava, 4,5%',38,0.4,3.0,0,'lata (350 ml)',350],['Cerveja Heineken, 5,0%',42,0.5,3.2,0,'lata (350 ml)',350],['Cerveja Amstel, 4,6%',39,0.4,3.1,0,'lata (350 ml)',350],['Cerveja Budweiser, 5,0%',42,0.4,3.3,0,'lata (350 ml)',350],['Cerveja Stella Artois, 5,0%',43,0.4,3.4,0,'lata (350 ml)',350],['Cerveja Corona, 4,5%',42,0.4,4.0,0,'long neck (330 ml)',330],['Cerveja Spaten, 5,2%',45,0.4,3.6,0,'lata (350 ml)',350],['Cerveja Devassa, 4,8%',41,0.4,3.3,0,'lata (350 ml)',350],['Cerveja Eisenbahn Pilsen, 4,8%',42,0.4,3.5,0,'lata (350 ml)',350],['Cerveja Petra, 4,8%',42,0.4,3.4,0,'lata (350 ml)',350],['Cerveja Crystal, 4,5%',38,0.4,3.0,0,'lata (350 ml)',350],['Cerveja Nova Schin, 4,7%',40,0.4,3.0,0,'lata (350 ml)',350],['Cerveja Kaiser, 4,5%',38,0.4,2.8,0,'lata (350 ml)',350],['Cerveja Império, 4,5%',39,0.4,3.2,0,'lata (350 ml)',350],['Cerveja Michelob Ultra, 3,5%',23,0.2,0.7,0,'lata (350 ml)',350]
 ];
 const alimentosTodos = () => ALIMENTOS.map(a => ({nome:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6]})).concat((S.alimentacao.meus || []).map(m => Object.assign({meu:true}, m)));
 // Base completa (TBCA + TACO), carregada só quando a tela de refeição abre
@@ -553,7 +554,7 @@ function buscarAlimentos(q){
   const rapidos = ALIMENTOS.map(a => ({nome:a[0], principal:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6], rapido:true})).filter(a => hit(normBusca(a.nome)));
   const base = (BASE || []).filter(a => hit(a.busca)).map(a => ({a, s: (a.bp.startsWith(ws[0]) ? 0 : a.busca.startsWith(ws[0]) ? 300 : 600) + (ws.every(w => a.bp.includes(w)) ? 0 : 200) + a.bp.length + a.busca.length / 20}))
     .sort((x, y) => x.s - y.s).slice(0, 14).map(x => x.a);
-  return meus.concat(rapidos.slice(0, 4), base).slice(0, 16);
+  return meus.concat(rapidos.slice(0, 12), base).slice(0, 24);
 }
 const mealKcal = r => r.kcal != null ? r.kcal : kcalOf(r);
 
