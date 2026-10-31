@@ -530,6 +530,7 @@ const ALIMENTOS = [
   ['Alface',11,1.3,1.7,0.2,'prato',50],['Tomate',15,1.1,3.1,0.2,'unidade',100],['Brócolis cozido',25,2.1,4.4,0.5,'porção',60],
   ['Cenoura crua',34,1.3,7.7,0.2,'porção',50],['Abobrinha refogada',25,1.1,4.0,0.6,'porção',80],
   ['Café sem açúcar',2,0.2,0.3,0,'xícara',50],['Suco de laranja natural',33,0.7,7.6,0.1,'copo (250 ml)',250],
+  ['Bolinho de feijoada, frito',261,9.8,25.4,14.1,'unidade',35],['Bolinho de cupim, frito',269,11.1,21.7,15.4,'unidade',35],
   ['Refrigerante comum',41,0,10.4,0,'lata (350 ml)',350],['Cerveja pilsen',41,0.6,3.3,0,'lata (350 ml)',350]
 ];
 const alimentosTodos = () => ALIMENTOS.map(a => ({nome:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6]})).concat((S.alimentacao.meus || []).map(m => Object.assign({meu:true}, m)));
