@@ -45,6 +45,7 @@ const ICON = {
   cap:'<path d="M2 9l10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5"/>', gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   users2:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M22 20a6.5 6.5 0 0 0-4.5-6.2"/>'
 };
+ICON.chart = '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>';
 ICON.sun = '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>';
 ICON.moon = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>';
 ICON.auto = '<circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor"/>';
@@ -814,7 +815,7 @@ function cardVGV(){
   const v = vgv(S.clientes), mesNome = new Date().toLocaleDateString('pt-BR', {month:'long'});
   const porCor = S.corretores.map(b => ({b, ...vgv(S.clientes.filter(c => c.corretorId === b.id))})).filter(r => r.previsto || r.mes).sort((a, b) => (b.previsto + b.mes) - (a.previsto + a.mes));
   const max = Math.max(1, ...porCor.map(r => Math.max(r.previsto, r.mes)));
-  return `<section class="card rv"><div class="sec-row"><h2>VGV</h2><button class="link small" data-act="goclientes" data-v="todos">Ver clientes</button></div>
+  return `<section class="card rv"><div class="sec-row"><h2>VGV</h2><button class="link small" data-act="fechamentos">Fechamentos por mês</button></div>
     <div class="grid2" style="gap:16px">
       <div class="kpi"><span class="lbl">Previsto em andamento</span><span class="val num vgv" data-count="${Math.round(v.previsto)}" data-k="vgvp" data-brl="1">${brlCurto(v.previsto)}</span><span class="delta flat">${v.semValor ? v.semValor + ' clientes sem valor' : 'Todos com valor'}</span></div>
       <div class="kpi"><span class="lbl">Efetuado em ${mesNome}</span><span class="val num vgv up" data-count="${Math.round(v.mes)}" data-k="vgvm" data-brl="1">${brlCurto(v.mes)}</span><span class="delta flat">${v.nMes} ${v.nMes === 1 ? 'venda' : 'vendas'} · ano ${brlCurto(v.ano)}</span></div>
@@ -824,6 +825,44 @@ function cardVGV(){
       <span class="ct num small">${brlCurto(r.previsto)}<br><span class="up">${brlCurto(r.mes)}</span></span></button>`).join('')}</div>
       <div class="legend small muted"><span><i style="background:var(--accent)"></i>Previsto</span><span><i style="background:var(--ok)"></i>Efetuado no mês</span></div>` : ''}
   </section>`;
+}
+/* ---------- fechamentos por mês ---------- */
+const MESES_LONGO = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const nomeMes = ym => { const [y, m] = ym.split('-').map(Number); return MESES_LONGO[m - 1] + ' de ' + y; };
+const somaMes = (ym, n) => { const [y, m] = ym.split('-').map(Number), d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
+const vendas = () => CLI().filter(c => c.etapa === 'Venda');
+function sheetFechamentos(ym){
+  ym = ym || ui.fechMes || today().slice(0, 7); ui.fechMes = ym;
+  const todas = vendas(), doMes = todas.filter(c => dataVenda(c).slice(0, 7) === ym).sort((a, b) => dataVenda(b).localeCompare(dataVenda(a)));
+  const soma = arr => arr.reduce((a, c) => a + (+c.valor || 0), 0);
+  const total = soma(doMes), ant = soma(todas.filter(c => dataVenda(c).slice(0, 7) === somaMes(ym, -1)));
+  const ticket = doMes.length ? total / doMes.length : 0;
+  const meses = [...Array(12)].map((_, i) => somaMes(ym, i - 11)), porMes = meses.map(m => soma(todas.filter(c => dataVenda(c).slice(0, 7) === m)));
+  const nPorMes = meses.map(m => todas.filter(c => dataVenda(c).slice(0, 7) === m).length);
+  const maxM = Math.max(1, ...porMes);
+  const ano = ym.slice(0, 4), totAno = soma(todas.filter(c => dataVenda(c).slice(0, 4) === ano)), nAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).length;
+  const agrupar = keyFn => { const g = {}; doMes.forEach(c => { const k = keyFn(c); g[k] = g[k] || {n: 0, v: 0}; g[k].n++; g[k].v += +c.valor || 0; }); return Object.entries(g).sort((a, b) => b[1].v - a[1].v || b[1].n - a[1].n); };
+  const porCor = agrupar(c => c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome), porProd = agrupar(c => P(c.produtoId).nome);
+  const barras = (lista) => { const mx = Math.max(1, ...lista.map(([, x]) => x.v || x.n)); return `<div class="funnel">${lista.map(([k, x], j) => `<div class="fstage" style="--j:${j};grid-template-columns:110px 1fr auto"><span class="nm">${esc(k)}</span><span class="tr"><i style="transform:scaleX(0)" data-bar="${(x.v || x.n) / mx}" data-k="fx${ym}${j}${k}"></i></span><span class="ct num small" style="text-align:right">${x.n} · ${brlCurto(x.v)}</span></div>`).join('')}</div>`; };
+  const dif = ant ? (total - ant) / ant : null;
+  const W = 340, H = 150, base = 116, bw = 20, gap = (W - 12 * bw) / 13;
+  openSheet('Fechamentos', `<div class="form fech">
+    <div class="sec-row"><button type="button" class="round ghost" data-act="fechMes" data-v="${somaMes(ym, -1)}" aria-label="Mês anterior">${ic('left','s')}</button>
+      <b style="font-size:18px">${(t => t[0].toUpperCase() + t.slice(1))(nomeMes(ym))}</b>
+      <button type="button" class="round ghost" data-act="fechMes" data-v="${somaMes(ym, 1)}" aria-label="Próximo mês" ${ym >= today().slice(0, 7) ? 'disabled style="opacity:.35"' : ''}>${ic('chev','s')}</button></div>
+    <div class="grid2"><div class="card kpi"><span class="lbl">VGV fechado</span><span class="val num up" style="font-size:26px">${brlCurto(total)}</span><span class="delta ${dif == null ? 'flat' : dif >= 0 ? 'up' : 'down'}">${dif == null ? (ant === 0 && total ? 'mês anterior sem vendas' : '—') : (dif >= 0 ? '+' : '') + fmt(dif * 100) + '% vs. mês anterior'}</span></div>
+      <div class="card kpi"><span class="lbl">Vendas</span><span class="val num">${doMes.length}</span><span class="delta flat">ticket médio ${brlCurto(ticket)}</span></div></div>
+    <div class="card"><h2>Últimos 12 meses</h2><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="VGV fechado por mês">
+      ${meses.map((m, i) => { const h = Math.max(porMes[i] ? 3 : 0, base * porMes[i] / maxM), x = gap + i * (bw + gap), sel = m === ym;
+        return `<g class="fech-bar" data-act="fechMes" data-v="${m}" style="cursor:pointer"><rect x="${x - gap / 2}" y="0" width="${bw + gap}" height="${H}" fill="transparent"/><rect class="vb${sel ? ' today' : ''}" x="${x}" y="${base - h}" width="${bw}" height="${Math.max(h, .5)}" rx="5" style="--j:${i};transform:scaleY(0);${sel ? '' : 'opacity:.45'}" data-vbar="1" data-k="fm${m}${porMes[i]}"/>
+          ${nPorMes[i] ? `<text x="${x + bw / 2}" y="${base - h - 5}" text-anchor="middle" style="font-size:10px">${nPorMes[i]}</text>` : ''}<text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" style="${sel ? 'fill:var(--fg);font-weight:700' : ''}">${MES[+m.slice(5) - 1].slice(0, 1).toUpperCase()}</text>${m.slice(5) === '01' || i === 0 ? `<text x="${x + bw / 2}" y="${H - 1}" text-anchor="middle" style="font-size:9px">${m.slice(2, 4)}</text>` : ''}</g>`; }).join('')}
+    </svg><div class="small muted">Número acima da barra: vendas no mês. Toque numa barra para ver o mês.</div></div>
+    ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
+    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map(c => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><b class="num">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b></button>`).join('')}</div></div>`
+      : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
+    <div class="card kpi"><span class="lbl">Total de ${ano}</span><span class="val num">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
+  </div>`);
+  animate($('#sheetBody'));
 }
 function cardPorCorretor(){
   const at = ativos(); if (!at.length) return '';
@@ -855,6 +894,7 @@ function viewClientes(){
   const chips = [['todos','Todos'],['quentes','Quentes'], ...(recebidos.length ? [['recebidos','Compartilhados comigo']] : []), ...(S.clientes.some(c => c.shareId) ? [['meusComp','Que compartilhei']] : []), ...S.corretores.map(c => [c.id, c.nome])];
   const vf = vgv(base);
   return head(`${ativos().length} ativos · VGV ${brlCurto(vf.previsto)}`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
+  <button class="card tap rv fech-atalho" data-act="fechamentos">${ic('chart','s')}<span class="grow"><b>Fechamentos por mês</b><span class="small muted" style="display:block">${(n => n ? `${n} ${n === 1 ? 'venda' : 'vendas'} em ${new Date().toLocaleDateString('pt-BR', {month:'long'})} · ${brlCurto(vgv(CLI()).mes)}` : 'Vendas, VGV, corretores e produtos de cada mês')(vgv(CLI()).nMes)}</span></span>${ic('chev','s chev')}</button>
   <div class="chips rv">${chips.map(([k,l]) => `<button class="chip${fc === k ? ' on' : ''}" data-act="fcor" data-v="${k}">${esc(l)}</button>`).join('')}</div>
   <div class="rv"><label class="sr" for="fProd">Produto</label><select class="inp" id="fProd" data-change="fprod"><option value="todos">Todos os produtos</option>${prodOptions(fp)}</select></div>
   <section class="card rv"><div class="sec-row"><h2>Funil</h2>${fe ? `<button class="link" data-act="fetapa" data-v="">Limpar</button>` : `<span class="small muted">Conversão <b class="num">${fmt(conv*100)}%</b></span>`}</div>
@@ -1166,6 +1206,7 @@ function sheetCliente(c){
       <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(c._recebido ? (c.corretorNome || '') : S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
+    <div class="field" id="cVendaBox" ${c.etapa === 'Venda' ? '' : 'hidden'}><label for="cVenda">Data da venda</label><input class="inp" id="cVenda" type="date" value="${c.etapa === 'Venda' ? (c.vendaEm || dataVenda(c) || today()) : today()}" max="${today()}"></div>
     <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
     <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div>${(on => `<button type="button" class="sw${on ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${on}"></button>`)(c.id ? !!c.calEventId : lembreteAuto())}</div>
@@ -1216,7 +1257,7 @@ async function saveCliente(form){
   else { cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
     if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); } }
   Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
-  marcarVenda(c);
+  marcarVenda(c); if (c.etapa === 'Venda' && val('cVenda')) c.vendaEm = val('cVenda');
   if (etapaAnt && etapaAnt !== c.etapa) (c.historico = c.historico || []).push({de: etapaAnt, para: c.etapa, em: new Date().toISOString()});
   if (novo) S.clientes.push(c);
   const wantCal = $('#cCal').classList.contains('on');
@@ -1721,6 +1762,8 @@ const ACT = {
   },
   delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
+  fechamentos: () => sheetFechamentos(),
+  fechMes: el => { if (el.hasAttribute('disabled')) return; const sb = $('#sheetBody'), y = sb.scrollTop; sheetFechamentos(el.dataset.v || el.closest('[data-v]').dataset.v); sb.scrollTop = y; },
   pushOn: async el => { el.disabled = true; el.innerHTML = '<span class="spin" style="width:14px;height:14px"></span>'; try { await ativarPush(); toast('Notificações ativadas'); } catch(e) { toast(e.message, true); } blocoPush(); },
   pushOff: async () => { try { await desativarPush(); toast('Notificações desativadas neste aparelho'); } catch(e) { toast('Não deu para desativar: ' + e.message, true); } blocoPush(); },
   pushTipo: el => { const k = el.dataset.v, on = !el.classList.contains('on'); el.classList.toggle('on', on); el.setAttribute('aria-checked', on); S.prefs = Object.assign({}, S.prefs, {[k]: on}); save('prefs'); },
@@ -1870,6 +1913,7 @@ document.addEventListener('click', e => {
   e.preventDefault(); fn(el, e);
 });
 document.addEventListener('change', e => {
+  if (e.target.id === 'cEtapa') { const b = $('#cVendaBox'); if (b) b.hidden = e.target.value !== 'Venda'; }
   if (e.target.id === 'cProd') { const l = $('#vLocal'), p = P(e.target.value); if (l && (!l.value || /^Stand /.test(l.value))) l.value = e.target.value && p.nome !== 'Sem produto' ? 'Stand ' + p.nome : ''; }
   const el = e.target.closest('[data-change]'); if (!el) return;
   if (el.dataset.change === 'fprod') { ui.clientesFiltroProd = el.value; render(false); }
