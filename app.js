@@ -330,6 +330,161 @@ async function blocoPush(){
       <button type="button" class="link small" data-act="pushTeste" style="justify-self:start;margin-top:4px">Enviar um aviso de teste</button>` : ''}`;
 }
 
+
+/* ================= MODO TREINO ================= */
+// "Supino reto 4x10 40kg" → {nome, series, reps, kg}
+function parseEx(txt){
+  const t = String(txt || '').trim(); let series = 3, reps = 12, kg = 0, nome = t;
+  const m = t.match(/(\d+)\s*[xX×]\s*(\d+)(?:\s*(?:-|a)\s*\d+)?/);
+  if (m) { series = Math.min(12, +m[1] || 3); reps = +m[2] || 12; nome = nome.replace(m[0], ''); }
+  const k = t.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
+  if (k) { kg = parseFloat(k[1].replace(',', '.')); nome = nome.replace(k[0], ''); }
+  nome = nome.replace(/[·•|\-–]+\s*$/, '').replace(/\s*[·•|]\s*/g, ' ').replace(/\s{2,}/g, ' ').trim() || t;
+  return {nome, series, reps, kg};
+}
+const SKEY = 'foco-sessao';
+let sessao = null, sessTick = null, wakeLock = null, audioCtx = null;
+function salvarSessao(){ try { if (sessao) localStorage.setItem(SKEY, JSON.stringify(sessao)); else localStorage.removeItem(SKEY); } catch(e) {} }
+function carregarSessao(){ try { const v = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (v && Date.now() - v.inicio < 12 * 3600e3) return v; } catch(e) {} return null; }
+const agoraMs = () => Date.now();
+const tempoAtivo = x => Math.max(0, (x.fimEm || agoraMs()) - x.inicio - x.pausaTotal - (x.pausadoEm ? agoraMs() - x.pausadoEm : 0));
+const mmss = ms => { const t = Math.max(0, Math.round(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = t % 60; return (h ? h + ':' + pad(m) : m) + ':' + pad(sec); };
+const pesoAtual = () => { const p = pesoSorted(); return p.length ? +p[p.length - 1].kg : null; };
+const MET = {leve: 3.5, moderado: 5.0, intenso: 6.0};
+const kcalTreino = (ms, kg, int) => Math.round(MET[int || 'moderado'] * (kg || 75) * ms / 3600e3);
+const totSeries = x => x.exs.reduce((a, e) => a + e.series.length, 0);
+const feitasSeries = x => x.exs.reduce((a, e) => a + e.series.filter(z => z.feita).length, 0);
+const volume = x => Math.round(x.exs.reduce((a, e) => a + e.series.filter(z => z.feita).reduce((b, z) => b + (+z.kg || 0) * (+z.reps || 0), 0), 0));
+
+function iniciarTreino(rotinaId){
+  const r = find(S.treinos.rotinas, rotinaId); if (!r) return;
+  if (!(r.exercicios || []).length) return toast('Cadastre os exercícios da rotina primeiro.', true);
+  const ult = [...S.treinos.feitos].reverse().find(f => f.rotinaId === r.id && f.exs);
+  sessao = {rotinaId: r.id, nome: r.nome, descanso: r.descanso || 60, inicio: agoraMs(), pausaTotal: 0, pausadoEm: null, descansoAte: null, descansoDe: null, foco: 0,
+    exs: r.exercicios.map((txt, i) => { const p = parseEx(txt), prev = ult && ult.exs[i] && ult.exs[i].nome === p.nome ? ult.exs[i] : null;
+      return {nome: p.nome, series: [...Array(p.series)].map((_, j) => ({reps: prev && prev.series[j] ? prev.series[j].reps : p.reps, kg: prev && prev.series[j] && prev.series[j].kg ? prev.series[j].kg : p.kg, feita: false}))}; })};
+  salvarSessao(); abrirSessao();
+}
+async function pedirTelaLigada(){ try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); } } catch(e) {} }
+function soltarTela(){ try { wakeLock && wakeLock.release(); } catch(e) {} wakeLock = null; }
+function bip(){
+  try { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, .22, .44].forEach((t, i) => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = i === 2 ? 1320 : 880; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(.0001, audioCtx.currentTime + t); g.gain.exponentialRampToValueAtTime(.25, audioCtx.currentTime + t + .02); g.gain.exponentialRampToValueAtTime(.0001, audioCtx.currentTime + t + .18);
+      o.start(audioCtx.currentTime + t); o.stop(audioCtx.currentTime + t + .2); }); } catch(e) {}
+  try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch(e) {}
+}
+function abrirSessao(){
+  let w = $('#treinoWrap');
+  if (!w) { w = document.createElement('div'); w.id = 'treinoWrap'; w.setAttribute('role', 'dialog'); w.setAttribute('aria-label', 'Treino em andamento'); document.body.appendChild(w); }
+  w.hidden = false; document.body.classList.add('em-treino'); pedirTelaLigada();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  renderSessao(true);
+  clearInterval(sessTick); sessTick = setInterval(tickSessao, 250);
+}
+function fecharSessao(){ clearInterval(sessTick); soltarTela(); const w = $('#treinoWrap'); if (w) { w.classList.add('saindo'); setTimeout(() => { w.hidden = true; w.classList.remove('saindo'); w.innerHTML = ''; }, RM.matches ? 0 : 320); } document.body.classList.remove('em-treino'); }
+function tickSessao(){
+  if (!sessao) return;
+  const el = $('#tsTempo'); if (el) el.textContent = mmss(tempoAtivo(sessao));
+  const kc = $('#tsKcal'); if (kc) kc.textContent = fmt(kcalTreino(tempoAtivo(sessao), pesoAtual(), 'moderado'));
+  if (sessao.descansoAte && !sessao.pausadoEm) {
+    const rest = sessao.descansoAte - agoraMs(), tot = sessao.descanso * 1000;
+    const t = $('#tsRest'), ring = $('#tsRestRing');
+    if (t) t.textContent = mmss(rest);
+    if (ring) { const C = +ring.dataset.c; ring.style.strokeDashoffset = C * (1 - clamp(rest / Math.max(tot, 1))); }
+    if (rest <= 0) { sessao.descansoAte = null; salvarSessao(); bip(); renderSessao(); toast('Descanso terminado. Próxima série!'); }
+  }
+}
+function proximaPendente(x){ for (let i = 0; i < x.exs.length; i++) { const j = x.exs[i].series.findIndex(z => !z.feita); if (j >= 0) return [i, j]; } return null; }
+function renderSessao(entrando){
+  const w = $('#treinoWrap'); if (!w || !sessao) return;
+  const x = sessao, tot = totSeries(x), fe = feitasSeries(x), pend = proximaPendente(x), pc = tot ? fe / tot : 0;
+  const R = 34, C = 2 * Math.PI * R;
+  const descansando = !!x.descansoAte;
+  const restR = 92, restC = 2 * Math.PI * restR;
+  w.innerHTML = `<div class="ts${entrando ? ' entra' : ''}">
+    <header class="ts-head"><button class="round ghost" data-act="tsMin" aria-label="Minimizar treino">${ic('chev','s')}</button>
+      <div class="ts-tit"><span class="small muted">${x.pausadoEm ? 'Pausado' : 'Treinando'}</span><b>${esc(x.nome)}</b></div>
+      <button class="mini" data-act="tsFinalizar">Finalizar</button></header>
+    <section class="ts-stats">
+      <div class="ts-ring"><svg width="84" height="84"><circle cx="42" cy="42" r="${R}" class="trk" stroke-width="8" fill="none"/><circle cx="42" cy="42" r="${R}" stroke="var(--ok)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="${C}" style="stroke-dashoffset:${C * (1 - pc)};transition:stroke-dashoffset .6s var(--ease);transform:rotate(-90deg);transform-origin:center"/></svg><span class="num"><b>${fe}</b>/${tot}</span></div>
+      <div class="ts-num"><span class="lbl">Tempo</span><b class="num" id="tsTempo">${mmss(tempoAtivo(x))}</b></div>
+      <div class="ts-num"><span class="lbl">kcal</span><b class="num" id="tsKcal">${fmt(kcalTreino(tempoAtivo(x), pesoAtual()))}</b></div>
+    </section>
+    <div class="ts-ctrl"><button class="btn sec" data-act="tsPausa">${x.pausadoEm ? ic('chev','s') + 'Continuar' : '<span class="pz"></span>Pausar'}</button>
+      <label class="ts-desc">Descanso<select class="inp" id="tsDescSel" data-change="tsDesc">${[30,45,60,75,90,120,150,180].map(v => `<option value="${v}"${v === x.descanso ? ' selected' : ''}>${v < 60 ? v + ' s' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min'}</option>`).join('')}</select></label></div>
+    ${descansando ? `<section class="ts-rest" aria-live="polite"><svg width="210" height="210" viewBox="0 0 210 210"><circle cx="105" cy="105" r="${restR}" class="trk" stroke-width="12" fill="none"/><circle id="tsRestRing" data-c="${restC}" cx="105" cy="105" r="${restR}" stroke="var(--accent)" stroke-width="12" fill="none" stroke-linecap="round" stroke-dasharray="${restC}" style="transform:rotate(-90deg);transform-origin:center;transition:stroke-dashoffset .25s linear"/></svg>
+      <div class="ts-rest-c"><span class="small muted">Descanso</span><b class="num" id="tsRest">${mmss(x.descansoAte - agoraMs())}</b>${pend ? `<span class="small muted">Próxima: ${esc(x.exs[pend[0]].nome)} · série ${pend[1] + 1}</span>` : ''}</div>
+      <div class="btnrow ts-rest-b"><button class="mini" data-act="tsMais">+15 s</button><button class="mini" data-act="tsPular">Pular descanso</button></div></section>` : ''}
+    <section class="ts-list">${x.exs.map((e, i) => { const ok = e.series.every(z => z.feita), atual = pend && pend[0] === i;
+      return `<div class="ts-ex${ok ? ' ok' : ''}${atual ? ' atual' : ''}" id="tsEx${i}"><div class="ts-ex-h"><span class="ts-n num">${ok ? ic('check','s') : i + 1}</span><b>${esc(e.nome)}</b><span class="small muted num">${e.series.filter(z => z.feita).length}/${e.series.length}</span></div>
+        <div class="ts-sets">${e.series.map((z, j) => `<div class="ts-set${z.feita ? ' feita' : ''}${atual && pend[1] === j ? ' prox' : ''}"><span class="small muted">Série ${j + 1}</span>
+          <label><input class="inp num" type="number" inputmode="decimal" min="0" step="0.5" value="${z.kg || ''}" placeholder="kg" data-tsk="${i}.${j}.kg" aria-label="Carga em kg"><span>kg</span></label>
+          <label><input class="inp num" type="number" inputmode="numeric" min="0" value="${z.reps}" data-tsk="${i}.${j}.reps" aria-label="Repetições"><span>rep</span></label>
+          <button class="check${z.feita ? ' on' : ''}" data-act="tsSerie" data-v="${i}.${j}" aria-label="Concluir série ${j + 1} de ${esc(e.nome)}"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button></div>`).join('')}
+          <div class="btnrow" style="gap:6px"><button class="link small" data-act="tsAddSerie" data-v="${i}">+ série</button>${e.series.length > 1 ? `<button class="link small" data-act="tsRemSerie" data-v="${i}" style="color:var(--fg2)">− série</button>` : ''}</div></div></div>`; }).join('')}
+      ${!pend ? `<div class="ts-fim"><b>Todas as séries concluídas</b><button class="btn pri wide" data-act="tsFinalizar">Finalizar treino</button></div>` : ''}</section>
+  </div>`;
+  w.querySelectorAll('[data-tsk]').forEach(inp => inp.addEventListener('input', () => { const [i, j, k] = inp.dataset.tsk.split('.'); sessao.exs[+i].series[+j][k] = parseFloat(inp.value.replace(',', '.')) || 0; salvarSessao(); }));
+  if (entrando && pend) setTimeout(() => { const el = $('#tsEx' + pend[0]); if (el) el.scrollIntoView({block: 'center', behavior: RM.matches ? 'auto' : 'smooth'}); }, 350);
+}
+function telaResumo(){
+  const x = sessao, ms = tempoAtivo(x), kg = pesoAtual(), int = x.int || 'moderado';
+  const w = $('#treinoWrap');
+  w.innerHTML = `<div class="ts ts-resumo entra">
+    <div class="ts-trofeu">${ic('check')}</div><h2>Treino concluído</h2><p class="muted" style="margin:0">${esc(x.nome)}</p>
+    <div class="ts-kcal"><b class="num" id="trKcal">${fmt(kcalTreino(ms, kg, int))}</b><span>kcal estimadas</span></div>
+    <div class="grid2" style="width:100%"><div class="card kpi"><span class="lbl">Duração</span><span class="val num">${mmss(ms)}</span></div>
+      <div class="card kpi"><span class="lbl">Séries</span><span class="val num">${feitasSeries(x)}<small>/${totSeries(x)}</small></span></div>
+      <div class="card kpi"><span class="lbl">Volume</span><span class="val num">${fmt(volume(x))}<small>kg</small></span></div>
+      <div class="card kpi"><span class="lbl">Exercícios</span><span class="val num">${x.exs.filter(e => e.series.some(z => z.feita)).length}<small>/${x.exs.length}</small></span></div></div>
+    <div class="field" style="width:100%"><label>Como foi a intensidade?</label>${seg('tsInt', [['leve','Leve'],['moderado','Moderada'],['intenso','Intensa']], int)}</div>
+    ${kg ? '' : `<div class="field" style="width:100%"><label for="trPeso">Seu peso (kg) para o cálculo</label><input class="inp num" id="trPeso" type="number" inputmode="decimal" placeholder="75" data-change="trPeso"></div>`}
+    <p class="small muted" style="margin:0">Estimativa pelo método MET: intensidade × ${kg ? fmt(kg, 1) + ' kg (seu último peso)' : 'seu peso'} × tempo ativo, sem contar pausas. O gasto real varia com o ritmo e o descanso entre séries.</p>
+    <button class="btn pri wide" data-act="tsSalvar">Salvar treino</button>
+    <button class="btn sec wide" data-act="tsVoltar">Voltar ao treino</button>
+    <button class="link small" data-act="tsDescartar" style="color:var(--err)">Descartar sem salvar</button>
+  </div>`;
+  w.querySelectorAll('.seg').forEach(placeThumb);
+  const k = $('#trKcal'); if (k && !RM.matches) countUp(k, 0, kcalTreino(ms, kg, int), 0);
+}
+const ACT_TREINO = {
+  iniciarTreino: el => iniciarTreino(el.dataset.id),
+  retomarTreino: () => abrirSessao(),
+  tsMin: () => { fecharSessao(); render(false); },
+  tsPausa: () => { const x = sessao; if (x.pausadoEm) { const d = agoraMs() - x.pausadoEm; x.pausaTotal += d; if (x.descansoAte) x.descansoAte += d; x.pausadoEm = null; pedirTelaLigada(); } else { x.pausadoEm = agoraMs(); } salvarSessao(); renderSessao(); },
+  tsSerie: el => {
+    const [i, j] = el.dataset.v.split('.').map(Number), z = sessao.exs[i].series[j];
+    z.feita = !z.feita; z.em = z.feita ? agoraMs() : null;
+    if (z.feita) { el.classList.add('on', 'pop'); if (proximaPendente(sessao)) { sessao.descansoAte = agoraMs() + sessao.descanso * 1000; } else sessao.descansoAte = null; }
+    else sessao.descansoAte = null;
+    if (sessao.pausadoEm) { sessao.pausaTotal += agoraMs() - sessao.pausadoEm; sessao.pausadoEm = null; }
+    salvarSessao(); setTimeout(() => { renderSessao(); const p = proximaPendente(sessao); if (p && sessao.exs[p[0]].series[p[1]] && p[1] === 0) { const e = $('#tsEx' + p[0]); e && e.scrollIntoView({block: 'center', behavior: RM.matches ? 'auto' : 'smooth'}); } }, RM.matches ? 0 : 260);
+  },
+  tsMais: () => { sessao.descansoAte += 15000; salvarSessao(); tickSessao(); },
+  tsPular: () => { sessao.descansoAte = null; salvarSessao(); renderSessao(); },
+  tsAddSerie: el => { const e = sessao.exs[+el.dataset.v], l = e.series[e.series.length - 1] || {reps: 12, kg: 0}; e.series.push({reps: l.reps, kg: l.kg, feita: false}); salvarSessao(); renderSessao(); },
+  tsRemSerie: el => { const e = sessao.exs[+el.dataset.v]; if (e.series.length > 1) e.series.pop(); salvarSessao(); renderSessao(); },
+  tsFinalizar: () => { if (!feitasSeries(sessao)) return toast('Conclua pelo menos uma série ou descarte o treino.', true); sessao.fimEm = agoraMs(); if (sessao.pausadoEm) { sessao.pausaTotal += sessao.fimEm - sessao.pausadoEm; sessao.pausadoEm = null; } sessao.descansoAte = null; salvarSessao(); telaResumo(); },
+  tsVoltar: () => { delete sessao.fimEm; salvarSessao(); renderSessao(true); },
+  tsInt: el => { sessao.int = el.dataset.v; el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); const k = $('#trKcal'); if (k) k.textContent = fmt(kcalTreino(tempoAtivo(sessao), pesoAtual() || num('trPeso'), sessao.int)); },
+  tsSalvar: () => {
+    const x = sessao, ms = tempoAtivo(x), kg = pesoAtual() || num('trPeso') || 75;
+    const reg = {data: ymd(new Date(x.inicio)), rotinas: [x.rotinaId], rotinaId: x.rotinaId, nome: x.nome, inicio: x.inicio, duracao: Math.round(ms / 1000), series: feitasSeries(x), seriesTotal: totSeries(x),
+      volume: volume(x), int: x.int || 'moderado', pesoCalc: kg, kcal: kcalTreino(ms, kg, x.int), exs: x.exs.map(e => ({nome: e.nome, series: e.series.map(z => ({reps: z.reps, kg: z.kg, feita: z.feita}))}))};
+    S.treinos.feitos.push(reg);
+    const r = find(S.treinos.rotinas, x.rotinaId); if (r) { r.descanso = x.descanso; r.exercicios = x.exs.map((e, i) => { const s0 = e.series[0] || {}; return `${e.nome} ${e.series.length}x${s0.reps || 12}${s0.kg ? ' ' + String(s0.kg).replace('.', ',') + 'kg' : ''}`; }); }
+    if (S.treinos.feitos.length > 800) S.treinos.feitos = S.treinos.feitos.slice(-800);
+    sessao = null; salvarSessao(); save('treinos'); fecharSessao(); render(false); toast(`Treino salvo · ${fmt(reg.kcal)} kcal`);
+  },
+  tsDescartar: () => { if ($('#tsCfm')) { sessao = null; salvarSessao(); fecharSessao(); render(false); toast('Treino descartado'); return; }
+    const b = document.querySelector('[data-act=tsDescartar]'); b.insertAdjacentHTML('afterend', '<div class="confirm" id="tsCfm" style="width:100%"><b>Descartar este treino? Nada será salvo.</b><div class="btnrow"><button class="btn sec" data-act="tsCfmNo">Manter</button><button class="btn dan" data-act="tsDescartar">Descartar</button></div></div>'); },
+  tsCfmNo: () => { const c = $('#tsCfm'); c && c.remove(); },
+  delTreinoFeito: el => { S.treinos.feitos = S.treinos.feitos.filter(f => String(f.inicio || f.data) !== el.dataset.v); save('treinos'); render(false); toast('Registro apagado'); },
+  diaTreino: el => { const d = el.dataset.v; if (d > today()) return; if (treinoFeito(d)) { S.treinos.feitos = S.treinos.feitos.filter(f => f.data !== d); toast('Treino desmarcado em ' + ddmm(d)); } else { S.treinos.feitos.push({data: d, rotinas: rotinasDe(d).map(r => r.id)}); toast('Treino marcado em ' + ddmm(d)); } save('treinos'); render(false); },
+};
+document.addEventListener('visibilitychange', () => { if (!document.hidden && sessao && !$('#treinoWrap')?.hidden) { pedirTelaLigada(); tickSessao(); } });
+
 /* ================= animação ================= */
 const mem = new Map();
 function tween(el, prop, a, b){ el.style.transition = 'none'; el.style[prop] = a; el.getBoundingClientRect(); el.style.transition = ''; el.style[prop] = b; }
@@ -582,7 +737,7 @@ function viewHoje(){
   const quentes = ativos().filter(c => c.temp === 'Quente').length;
   const atras = ativos().filter(c => c.lembrete && c.lembrete.slice(0,10) < t).length;
   const ps = pesoSorted(), last = ps[ps.length-1], d7 = pesoDelta(7);
-  const sd = somaDia(t);
+  const sd = somaDia(t), gastoHoje = S.treinos.feitos.filter(f => f.data === t).reduce((a, f) => a + (f.kcal || 0), 0);
 
   const pend = tasks.filter(x => !x.done), feitas = tasks.filter(x => x.done);
   const taskRow = x => `<div class="row${x.done ? ' done' : ''}" data-flip="${x.k}${x.id||''}">
@@ -607,7 +762,7 @@ function viewHoje(){
   <section class="grid2">
     <button class="card tap kpi rv" data-act="goclientes" data-v="quentes"><span class="lbl">Clientes quentes</span><span class="val num" data-count="${quentes}" data-k="kq">0</span><span class="delta ${atras ? 'down' : 'flat'}">${atras ? atras + ' atrasados' : 'Tudo em dia'}</span></button>
     <button class="card tap kpi rv" data-act="gocorpo" data-v="peso"><span class="lbl">Peso</span><span class="val num">${last ? `<span data-count="${last.kg}" data-dec="1" data-k="kp">0</span><small>kg</small>` : '—'}</span><span class="delta ${d7 == null ? 'flat' : d7 <= 0 ? 'up' : 'down'}">${d7 == null ? 'Registre hoje' : (d7 > 0 ? '+' : '') + fmt(d7, 1) + ' kg em 7 dias'}</span></button>
-    <button class="card tap kpi rv" data-act="gocorpo" data-v="alimentacao"><span class="lbl">Calorias hoje</span><span class="val num"><span data-count="${sd.k}" data-k="kk">0</span><small>kcal</small></span>${S.alimentacao.metas ? hbar(sd.k / metaKcal(), 'kkb', sd.k > metaKcal() * 1.05 ? 'var(--warn)' : 'var(--ok)') : '<span class="delta flat">Defina as metas</span>'}</button>
+    <button class="card tap kpi rv" data-act="gocorpo" data-v="alimentacao"><span class="lbl">Calorias hoje</span><span class="val num"><span data-count="${sd.k}" data-k="kk">0</span><small>kcal</small></span>${gastoHoje ? `<span class="delta up">−${fmt(gastoHoje)} kcal no treino</span>` : ''}${S.alimentacao.metas ? hbar(sd.k / metaKcal(), 'kkb', sd.k > metaKcal() * 1.05 ? 'var(--warn)' : 'var(--ok)') : '<span class="delta flat">Defina as metas</span>'}</button>
     <button class="card tap kpi rv" data-act="goestudos" data-v="leitura"><span class="lbl">Livros em ${now.getFullYear()}</span><span class="val num"><span data-count="${lidosAno()}" data-k="kl">0</span><small>de ${S.livros.meta || 0}</small></span>${hbar(S.livros.meta ? lidosAno() / S.livros.meta : 0, 'klb')}</button>
   </section>
 
@@ -847,22 +1002,32 @@ function corpoPeso(){
 function corpoTreino(){
   const t = today(), d = parseD(t), off = (d.getDay() + 6) % 7, ini = addDays(t, -off);
   const week = [...Array(7)].map((_, i) => addDays(ini, i));
-  const rot = rotinasDe(t), feito = treinoFeito(t);
+  const rot = rotinasDe(t), feitosHoje = S.treinos.feitos.filter(f => f.data === t);
   const n30 = new Set(S.treinos.feitos.filter(f => f.data > addDays(t, -30)).map(f => f.data)).size;
+  const kcal7 = S.treinos.feitos.filter(f => f.data > addDays(t, -7)).reduce((a, f) => a + (f.kcal || 0), 0);
   const semana = week.filter(x => treinoFeito(x)).length, plano = week.filter(x => rotinasDe(x).length).length;
+  const hist = S.treinos.feitos.filter(f => f.duracao).slice(-8).reverse();
+  const outras = S.treinos.rotinas.filter(r => !rot.includes(r));
+  const rotCard = r => { const exs = (r.exercicios || []).map(parseEx), feita = feitosHoje.find(f => f.rotinaId === r.id);
+    return `<div class="rot-hoje"><div class="sec-row"><b style="font-size:20px">${esc(r.nome)}</b>${feita ? `<span class="pill ok">${feita.duracao ? mmss(feita.duracao * 1000) + ' · ' + fmt(feita.kcal) + ' kcal' : 'feito'}</span>` : `<span class="small muted">${exs.length} exercícios · ${exs.reduce((a, e) => a + e.series, 0)} séries</span>`}</div>
+      <div class="list" style="margin:6px 0 12px">${exs.map(e => `<div class="row" style="padding:8px 0"><span class="grow">${esc(e.nome)}</span><span class="small muted num">${e.series}×${e.reps}${e.kg ? ' · ' + fmt(e.kg, e.kg % 1 ? 1 : 0) + ' kg' : ''}</span></div>`).join('') || '<p class="muted small">Sem exercícios cadastrados.</p>'}</div>
+      ${sessao && sessao.rotinaId === r.id ? `<button class="btn pri wide" data-act="retomarTreino">${ic('dumbbell','s')}Voltar ao treino · ${mmss(tempoAtivo(sessao))}</button>`
+        : `<button class="btn ${feita ? 'sec' : 'pri'} wide btn-iniciar" data-act="iniciarTreino" data-id="${r.id}">${ic('dumbbell','s')}${feita ? 'Treinar de novo' : 'Iniciar treino'}</button>`}</div>`; };
   return `
+  ${sessao ? `<button class="banner rv ativo-treino" data-act="retomarTreino">${ic('dumbbell')}<div class="grow" style="text-align:left"><b>Treino em andamento: ${esc(sessao.nome)}</b><br><span class="muted small">${feitasSeries(sessao)} de ${totSeries(sessao)} séries · toque para voltar</span></div>${ic('chev','s')}</button>` : ''}
   <section class="card rv"><div class="sec-row" style="margin-bottom:12px"><h2 style="margin:0">Esta semana</h2><span class="small muted"><b class="num">${semana}</b> de ${plano || 0} planejados</span></div>
-    <div class="week">${week.map(x => { const dd = parseD(x); return `<div class="wd${x === t ? ' today' : ''}${treinoFeito(x) ? ' done' : ''}"><span class="l">${DOW1[dd.getDay()]}</span><span class="n num">${dd.getDate()}</span><span class="m${rotinasDe(x).length ? ' on' : ''}"></span></div>`; }).join('')}</div>
+    <div class="week">${week.map(x => { const dd = parseD(x); return `<button class="wd${x === t ? ' today' : ''}${treinoFeito(x) ? ' done' : ''}" data-act="diaTreino" data-v="${x}" ${x > t ? 'disabled' : ''} aria-label="${treinoFeito(x) ? 'Desmarcar' : 'Marcar'} treino em ${ddmm(x)}"><span class="l">${DOW1[dd.getDay()]}</span><span class="n num">${dd.getDate()}</span><span class="m${rotinasDe(x).length ? ' on' : ''}"></span></button>`; }).join('')}</div>
+    <p class="small muted" style="margin:10px 0 0">Toque num dia para marcar ou desmarcar um treino feito fora do app.</p>
   </section>
   <section class="card rv"><h2>Treino de hoje</h2>
-    ${rot.length ? rot.map(r => `<div class="t" style="font-weight:700;font-size:20px;margin-bottom:6px">${esc(r.nome)}</div>
-      <div class="list" style="margin-bottom:14px">${(r.exercicios||[]).map(e => `<div class="row"><span class="grow">${esc(e)}</span></div>`).join('') || '<p class="muted small">Sem exercícios cadastrados.</p>'}</div>`).join('')
-      + `<button class="btn ${feito ? 'sec' : 'pri'} wide" data-act="treinoFeito">${feito ? `${ic('check','s')}Treino concluído · desfazer` : 'Concluir treino'}</button>`
-      : empty('dumbbell', 'Descanso hoje', S.treinos.rotinas.length ? 'Nenhuma rotina marcada para hoje.' : 'Monte suas rotinas e escolha os dias da semana de cada uma.', S.treinos.rotinas.length ? `<button class="btn sec" data-act="treinoAvulso">Registrar treino avulso</button>` : `<button class="btn pri" data-act="novaRotina">${ic('plus','s')}Nova rotina</button>`)}
+    ${rot.length ? rot.map(rotCard).join('<hr class="sep">')
+      : empty('dumbbell', 'Descanso hoje', S.treinos.rotinas.length ? 'Nenhuma rotina marcada para hoje. Quer treinar mesmo assim? Escolha abaixo.' : 'Monte suas rotinas com séries, repetições e carga.', S.treinos.rotinas.length ? '' : `<button class="btn pri" data-act="novaRotina">${ic('plus','s')}Nova rotina</button>`)}
+    ${outras.length ? `<div class="field" style="margin-top:14px"><label>${rot.length ? 'Ou treinar outra rotina' : 'Treinar uma rotina'}</label><div class="chips" style="flex-wrap:wrap">${outras.map(r => `<button class="chip" data-act="iniciarTreino" data-id="${r.id}">${ic('dumbbell','s')} ${esc(r.nome)}</button>`).join('')}</div></div>` : ''}
   </section>
   <section class="grid2"><div class="card kpi rv"><span class="lbl">Treinos em 30 dias</span><span class="val num" data-count="${n30}" data-k="t30">0</span></div>
-    <div class="card kpi rv"><span class="lbl">Rotinas</span><span class="val num">${S.treinos.rotinas.length}</span></div></section>
-  ${S.treinos.rotinas.length ? `<section class="card rv"><h2>Rotinas</h2><div class="list">${S.treinos.rotinas.map(r => `<button class="row rowbtn" data-act="editRotina" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${(r.dias||[]).length ? [...r.dias].sort((a,b) => ((a+6)%7) - ((b+6)%7)).map(i => DOW[i]).join(', ') : 'Sem dia fixo'} · ${(r.exercicios||[]).length} exercícios</div></div>${ic('chev','s chev')}</button>`).join('')}</div></section>` : ''}`;
+    <div class="card kpi rv"><span class="lbl">Gasto em 7 dias</span><span class="val num"><span data-count="${kcal7}" data-k="tk7">0</span><small>kcal</small></span></div></section>
+  ${hist.length ? `<section class="card rv"><h2>Últimos treinos</h2><div class="list">${hist.map(f => `<div class="row"><div class="grow"><div class="t">${esc(f.nome || 'Treino')}</div><div class="s num">${parseD(f.data).toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'})} · ${mmss(f.duracao * 1000)} · ${f.series} séries${f.volume ? ' · ' + fmt(f.volume) + ' kg' : ''}</div></div><b class="num">${fmt(f.kcal)}</b><span class="small muted">kcal</span><button class="round ghost" data-act="delTreinoFeito" data-v="${f.inicio}" aria-label="Apagar registro">${ic('trash','s')}</button></div>`).join('')}</div></section>` : ''}
+  ${S.treinos.rotinas.length ? `<section class="card rv"><h2>Rotinas</h2><div class="list">${S.treinos.rotinas.map(r => `<button class="row rowbtn" data-act="editRotina" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${(r.dias||[]).length ? [...r.dias].sort((a,b) => ((a+6)%7) - ((b+6)%7)).map(i => DOW[i]).join(', ') : 'Sem dia fixo'} · ${(r.exercicios||[]).length} exercícios · descanso ${r.descanso || 60} s</div></div>${ic('chev','s chev')}</button>`).join('')}</div></section>` : ''}`;
 }
 function corpoAlim(){
   const t = today(), sd = somaDia(t), m = S.alimentacao.metas;
@@ -1231,7 +1396,8 @@ function sheetRotina(r){
   openSheet(novo ? 'Nova rotina' : 'Editar rotina', `<form class="form" data-form="rotina" data-id="${r.id || ''}">
     <div class="field"><label for="rNome">Nome</label><input class="inp" id="rNome" value="${esc(r.nome)}" placeholder="Treino A · Peito e tríceps" required autofocus></div>
     <div class="field"><label>Dias da semana</label><div class="toggles" id="rDias">${[1,2,3,4,5,6,0].map(i => `<button type="button" class="${(r.dias||[]).includes(i) ? 'on' : ''}" data-act="tgl" data-v="${i}" aria-label="${DOW[i]}">${DOW1[i]}</button>`).join('')}</div></div>
-    <div class="field"><label for="rEx">Exercícios (um por linha)</label><textarea class="inp" id="rEx" rows="7" placeholder="Supino reto 4x10 · 40 kg&#10;Crucifixo 3x12&#10;Tríceps corda 3x15">${esc((r.exercicios||[]).join('\n'))}</textarea></div>
+    <div class="field"><label for="rEx">Exercícios (um por linha: nome, séries x repetições e carga)</label><textarea class="inp" id="rEx" rows="8" placeholder="Supino reto 4x10 40kg&#10;Crucifixo 3x12 14kg&#10;Tríceps corda 3x15 25kg&#10;Prancha 3x45">${esc((r.exercicios||[]).join('\n'))}</textarea><span class="small muted">Sem séries informadas, o app usa 3x12. A carga é opcional.</span></div>
+    <div class="field"><label for="rDesc">Descanso entre séries</label><select class="inp" id="rDesc">${[30,45,60,75,90,120,150,180].map(v => opt(String(v), v < 60 ? v + ' segundos' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min', String(r.descanso || 60))).join('')}</select></div>
     <button class="btn pri wide">Salvar rotina</button>
     ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir rotina</button>${confirmBox('Excluir esta rotina?', 'delRotina', r.id)}` : ''}
   </form>`);
@@ -1438,7 +1604,7 @@ const ACT = {
     if (k === 'at') return openAtend(el.dataset.id);
     if (k === 'tar' || k === 'comp') return sheetTarefa(find(S.tarefas, el.dataset.id));
     if (k === 'peso') { ui.corpo = 'peso'; switchTab('corpo'); setTimeout(() => { const i = $('#pesoKg'); if (i) i.focus(); }, 450); return; }
-    if (k === 'treino') { ui.corpo = 'treino'; return switchTab('corpo'); }
+    if (k === 'treino') { if (sessao) return abrirSessao(); ui.corpo = 'treino'; return switchTab('corpo'); }
     if (k === 'alim') { ui.corpo = 'alimentacao'; return switchTab('corpo'); }
     if (k === 'ler') { ui.estudos = 'leitura'; return switchTab('estudos'); }
     if (k === 'curso') { ui.estudos = 'cursos'; ui.cursoAberto = cursosAtivos()[0] && cursosAtivos()[0].id; return switchTab('estudos'); }
@@ -1654,7 +1820,7 @@ const FORMS = {
   },
   rotina: f => {
     const id = f.dataset.id, r = id ? find(S.treinos.rotinas, id) : {id: uid()};
-    Object.assign(r, {nome: val('rNome'), dias: [...document.querySelectorAll('#rDias .on')].map(b => +b.dataset.v), exercicios: val('rEx').split('\n').map(s => s.trim()).filter(Boolean)});
+    Object.assign(r, {nome: val('rNome'), descanso: +val('rDesc') || 60, dias: [...document.querySelectorAll('#rDias .on')].map(b => +b.dataset.v), exercicios: val('rEx').split('\n').map(s => s.trim()).filter(Boolean)});
     if (!id) S.treinos.rotinas.push(r); save('treinos'); closeSheet(); render(false); toast('Rotina salva');
   },
   refeicao: () => {
@@ -1697,6 +1863,7 @@ const FORMS = {
   }
 };
 
+Object.assign(ACT, ACT_TREINO);
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = ACT[el.dataset.act]; if (!fn) return;
@@ -1706,6 +1873,8 @@ document.addEventListener('change', e => {
   if (e.target.id === 'cProd') { const l = $('#vLocal'), p = P(e.target.value); if (l && (!l.value || /^Stand /.test(l.value))) l.value = e.target.value && p.nome !== 'Sem produto' ? 'Stand ' + p.nome : ''; }
   const el = e.target.closest('[data-change]'); if (!el) return;
   if (el.dataset.change === 'fprod') { ui.clientesFiltroProd = el.value; render(false); }
+  if (el.dataset.change === 'tsDesc' && sessao) { sessao.descanso = +el.value; salvarSessao(); }
+  if (el.dataset.change === 'trPeso' && sessao) ACT_TREINO.tsInt(document.querySelector('[data-act=tsInt].on'));
 });
 document.addEventListener('submit', e => {
   const f = e.target.closest('[data-form]'); if (!f) return;
@@ -1743,6 +1912,7 @@ async function onUser(u){
   watchAtendimentos();
   watchCompartilhados();
   render(true); placePill();
+  sessao = carregarSessao(); if (sessao) { render(false); toast('Você tem um treino em andamento'); }
   registrarSW().then(() => atualizarFilaPush(false));
 }
 

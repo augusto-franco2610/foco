@@ -345,3 +345,63 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .op-ic{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);flex:none}
 .opcao:nth-child(2) .op-ic{background:rgba(175,82,222,.14);color:#AF52DE}
 .opcao:nth-child(3) .op-ic{background:var(--ok-soft);color:var(--ok)}
+
+/* ===== modo treino ===== */
+#treinoWrap{position:fixed;inset:0;z-index:50;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:env(safe-area-inset-top,0px) max(16px,env(safe-area-inset-right,0px)) calc(28px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+#treinoWrap.saindo{animation:tsOut .32s var(--ease) forwards}
+body.em-treino{overflow:hidden}
+.ts{max-width:600px;margin:0 auto;display:grid;gap:14px;padding-top:8px}
+.ts.entra{animation:tsIn .45s var(--ease) both}
+@keyframes tsIn{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@keyframes tsOut{to{opacity:0;transform:translateY(24px)}}
+.ts-head{display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:2;background:var(--bg);padding:8px 0}
+.ts-head .round svg{transform:rotate(90deg)}
+.ts-tit{flex:1;min-width:0;display:grid}
+.ts-tit b{font-size:20px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ts-stats{display:grid;grid-template-columns:auto 1fr 1fr;gap:12px;align-items:center;background:var(--surface);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow)}
+.ts-ring{position:relative;width:84px;height:84px}
+.ts-ring .trk{stroke:var(--surface2)}
+.ts-ring span{position:absolute;inset:0;display:grid;place-items:center;font-size:13px;color:var(--fg2)}
+.ts-ring b{font-size:20px;color:var(--fg)}
+.ts-num{display:grid;gap:2px}
+.ts-num .lbl{font-size:12px;color:var(--fg2);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.ts-num b{font-size:28px;letter-spacing:-.02em}
+.ts-ctrl{display:flex;gap:10px;align-items:end}
+.ts-ctrl .btn{flex:1}
+.ts-desc{display:grid;gap:4px;font-size:12px;color:var(--fg2);font-weight:600;flex:1}
+.ts-desc .inp{height:46px}
+.pz{display:inline-block;width:12px;height:14px;border-left:4px solid currentColor;border-right:4px solid currentColor}
+.ts-rest{position:relative;display:grid;justify-items:center;gap:12px;background:var(--surface);border-radius:var(--r-lg);padding:18px;box-shadow:var(--shadow-up);animation:tsIn .4s var(--spring) both}
+.ts-rest .trk{stroke:var(--surface2)}
+.ts-rest-c{position:absolute;top:18px;width:210px;height:210px;display:grid;place-content:center;justify-items:center;text-align:center;gap:2px;padding:0 30px}
+.ts-rest-c b{font-size:46px;letter-spacing:-.03em;line-height:1}
+.ts-list{display:grid;gap:12px}
+.ts-ex{background:var(--surface);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow);display:grid;gap:10px;transition:opacity .3s,box-shadow .3s,transform .3s}
+.ts-ex.atual{box-shadow:0 0 0 2px var(--accent),var(--shadow-up)}
+.ts-ex.ok{opacity:.6}
+.ts-ex-h{display:flex;align-items:center;gap:10px}
+.ts-ex-h b{flex:1;min-width:0;font-size:17px}
+.ts-n{width:28px;height:28px;border-radius:50%;background:var(--surface2);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
+.ts-ex.ok .ts-n{background:var(--ok);color:#fff}
+.ts-sets{display:grid;gap:8px}
+.ts-set{display:grid;grid-template-columns:62px minmax(0,1fr) minmax(0,1fr) 34px;gap:8px;align-items:center;padding:6px 8px;border-radius:12px;transition:background .3s}
+.ts-set.prox{background:var(--accent-soft)}
+.ts-set.feita{opacity:.65}
+.ts-set label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);min-width:0}
+.ts-set .inp{height:38px;padding:0 8px;text-align:center;font-size:16px}
+.ts-set .check{width:32px;height:32px}
+.ts-fim{display:grid;gap:10px;justify-items:center;text-align:center;padding:16px;background:var(--ok-soft);border-radius:var(--r-lg)}
+.ts-resumo{justify-items:center;text-align:center;padding-top:28px}
+.ts-resumo h2{margin:0;font-size:28px;letter-spacing:-.02em}
+.ts-trofeu{width:72px;height:72px;border-radius:50%;background:var(--ok);color:#fff;display:grid;place-items:center;animation:pop .6s var(--spring) both}
+.ts-trofeu svg{width:36px;height:36px;stroke-width:3}
+.ts-kcal{display:grid;gap:2px;margin:6px 0}
+.ts-kcal b{font-size:56px;letter-spacing:-.03em;line-height:1;color:var(--warn)}
+.ts-kcal span{color:var(--fg2);font-weight:600}
+.ts-resumo .kpi{text-align:left}
+.rot-hoje{display:grid}
+hr.sep{border:0;border-top:1px solid var(--line);margin:16px 0}
+.ativo-treino{width:100%;text-align:left;background:var(--ok-soft);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 4px var(--ok-soft)}}
+.wd[disabled]{opacity:.45;cursor:default}
+@media (max-width:360px){.ts-set{grid-template-columns:54px minmax(0,1fr) minmax(0,1fr) 32px;gap:6px}.ts-num b{font-size:24px}}
