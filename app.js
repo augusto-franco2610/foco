@@ -63,7 +63,7 @@ const MES = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','
 const ddmm = s => { const d = parseD(s); return `${pad(d.getDate())}/${pad(d.getMonth()+1)}`; };
 const longDate = d => d.toLocaleDateString('pt-BR', {weekday:'long', day:'numeric', month:'long'});
 const initials = n => (n||'?').trim().split(/\s+/).slice(0,2).map(p=>p[0]).join('').toUpperCase();
-const kcalOf = m => Math.round((+m.p||0)*4 + (+m.c||0)*4 + (+m.g||0)*9);
+const kcalOf = m => { const v = x => Math.max(0, +x || 0); return Math.round(v(m.p)*4 + v(m.c)*4 + v(m.g)*9); };
 const byKey = k => (a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0);
 
 const ICON = {
@@ -169,7 +169,10 @@ function reconstruirShares(){
       sharesMeus[x.sid] = x;
       const c = S.clientes.find(k => k.shareId === x.sid);
       if (c && x.atualizadoPor !== me.uid && atualizado > (c.shareSync || 0)) {
-        CAMPOS_CLI.forEach(k => { if (k !== 'criado' && cli[k] !== undefined) c[k] = cli[k]; }); c.shareSync = atualizado; mudouLocal = true;
+        // o id do produto é do cadastro do parceiro: não copia; acha o MEU produto pelo nome
+        CAMPOS_CLI.forEach(k => { if (k !== 'criado' && k !== 'produtoId' && cli[k] !== undefined) c[k] = cli[k]; });
+        if (cli.produtoNome) { const p = S.produtos.find(z => normNome(z.nome) === normNome(cli.produtoNome)); if (p) c.produtoId = p.id; }
+        c.shareSync = atualizado; mudouLocal = true;
       }
     } else {
       mapa[x.sid] = x;
@@ -215,7 +218,9 @@ let syncState = 'ok';
 function setSync(s){ syncState = s; const el = $('#syncInd'); if (el) { el.className = 'sync ' + s; el.lastChild.textContent = syncLabel(); } }
 const syncLabel = () => ({ok:'Salvo na sua conta', saving:'Salvando…', err:'Sem conexão, tentando de novo'})[syncState];
 
-const pending = new Set(); let saveTimer;
+const pending = new Set(); let saveTimer, flushFalhas = 0;
+addEventListener('offline', () => toast('Sem internet: o que você registrar fica guardado no aparelho e sobe quando a conexão voltar.', true));
+addEventListener('online', () => { if (pending.size) flush(); });
 // Seções cuja leitura falhou: NUNCA gravar por cima, senão a lista vazia apagaria o que está na nuvem.
 const naoCarregado = new Set(); let avisouNaoCarregado = 0;
 function save(...ks){
@@ -232,7 +237,13 @@ async function flush(){
     const batch = fdb.batch();
     ks.forEach(k => batch.set(fdb.doc(`users/${me.uid}/dados/${k}`), {v: S[k], at: Date.now()}));
     await batch.commit(); setSync('ok'); agendarFila();
-  } catch(e) { ks.forEach(k => pending.add(k)); setSync('err'); setTimeout(flush, 5000); }
+  } catch(e) {
+    ks.forEach(k => pending.add(k));
+    if (syncState !== 'err') toast('Não deu para salvar na nuvem agora. Seus dados continuam no aparelho e o app tenta de novo sozinho.', true);
+    setSync('err'); setTimeout(flush, Math.min(60000, 5000 * (flushFalhas = (flushFalhas || 0) + 1)));  // espera cada vez mais, até 1 min
+    return;
+  }
+  flushFalhas = 0;
 }
 
 // Lê uma seção; tenta 3 vezes. Devolve null se não conseguiu (diferente de "não existe", que é conta nova).
@@ -278,7 +289,7 @@ function watchAtendimentos(){
     .onSnapshot(qs => {
       const tudo = qs.docs.map(d => ({id: d.id, ...d.data()})); atend = tudo.filter(x => x.tipo !== 'cliente').map(limparAtend).filter(Boolean); docsA = tudo.filter(x => x.tipo === 'cliente'); reconstruirShares(); agendarFila();
       const ids = new Set(); atend.forEach(a => (a.participantes||[]).forEach(u => ids.add(u)));
-      loadPeople([...ids]).then(() => { if (!$('#sheetWrap').classList.contains('open') || ui.tab !== 'agenda') render(false); else render(false); });
+      loadPeople([...ids]).then(() => render(false));
     }, () => {});
 }
 async function loadPeople(ids){
@@ -290,9 +301,10 @@ async function loadDirectory(){
 }
 
 /* ================= Google Agenda ================= */
+// O token da Google Agenda fica SÓ na memória: nada de sessionStorage, onde um script injetado poderia lê-lo.
 let tok = null, tokExp = 0;
-try { const t = JSON.parse(sessionStorage.getItem('foco-gtok') || 'null'); if (t && t.exp > Date.now()) { tok = t.v; tokExp = t.exp; } } catch(e) {}
-function setTok(v, secs){ tok = v; tokExp = Date.now() + ((secs||3600) - 120) * 1000; try { sessionStorage.setItem('foco-gtok', JSON.stringify({v, exp: tokExp})); } catch(e) {} }
+try { sessionStorage.removeItem('foco-gtok'); } catch(e) {}   // apaga o que versões antigas deixaram
+function setTok(v, secs){ tok = v; tokExp = Date.now() + ((secs||3600) - 120) * 1000; }
 const hasTok = () => !!tok && Date.now() < tokExp;
 function requestTok(){
   return new Promise((res, rej) => {
@@ -400,13 +412,14 @@ async function blocoPush(){
 
 /* ================= MODO TREINO ================= */
 // "Supino reto 4x10 40kg" → {nome, series, reps, kg}
+// "Supino 4x10 40kg" → {nome:'Supino', series:4, reps:10, kg:40}. Aceita "4x10-12", "3x30s", "4x10 - 40 kg".
 function parseEx(txt){
-  const t = String(txt || '').trim(); let series = 3, reps = 12, kg = 0, nome = t;
-  const m = t.match(/(\d+)\s*[xX×]\s*(\d+)(?:\s*(?:-|a)\s*\d+)?/);
-  if (m) { series = Math.min(12, +m[1] || 3); reps = +m[2] || 12; nome = nome.replace(m[0], ''); }
-  const k = t.match(/(\d+(?:[.,]\d+)?)\s*kg/i);
-  if (k) { kg = parseFloat(k[1].replace(',', '.')); nome = nome.replace(k[0], ''); }
-  nome = nome.replace(/[·•|\-–]+\s*$/, '').replace(/\s*[·•|]\s*/g, ' ').replace(/\s{2,}/g, ' ').trim() || t;
+  const t = String(txt || '').trim(); let series = 3, reps = 12, kg = 0, resto = t;
+  const k = resto.match(/(\d+(?:[.,]\d+)?)\s*kg\b/i);                     // a carga sai primeiro, para não virar "faixa de repetições"
+  if (k) { kg = parseFloat(k[1].replace(',', '.')); resto = resto.replace(k[0], ' '); }
+  const m = resto.match(/(\d+)\s*[xX×]\s*(\d+)(?:\s*(?:-|a)\s*\d+)?(?:\s*(?:s|seg|segs|min)\b)?/);
+  if (m) { series = Math.min(12, +m[1] || 3); reps = Math.min(100, +m[2] || 12); resto = resto.replace(m[0], ' '); }
+  const nome = resto.replace(/[·•|]+|(^|\s)[-–]+(?=\s|$)/g, ' ').replace(/\s{2,}/g, ' ').trim() || t;
   return {nome, series, reps, kg};
 }
 const SKEY = 'foco-sessao';
@@ -492,7 +505,7 @@ function renderSessao(entrando){
           <div class="btnrow" style="gap:6px"><button class="link small" data-act="tsAddSerie" data-v="${i}">+ série</button>${e.series.length > 1 ? `<button class="link small" data-act="tsRemSerie" data-v="${i}" style="color:var(--fg2)">− série</button>` : ''}</div></div></div>`; }).join('')}
       ${!pend ? `<div class="ts-fim"><b>Todas as séries concluídas</b><button class="btn pri wide" data-act="tsFinalizar">Finalizar treino</button></div>` : ''}</section>
   </div>`;
-  w.querySelectorAll('[data-tsk]').forEach(inp => inp.addEventListener('input', () => { const [i, j, k] = inp.dataset.tsk.split('.'); sessao.exs[+i].series[+j][k] = parseFloat(inp.value.replace(',', '.')) || 0; salvarSessao(); }));
+  w.querySelectorAll('[data-tsk]').forEach(inp => inp.addEventListener('input', () => { const [i, j, k] = inp.dataset.tsk.split('.'); sessao.exs[+i].series[+j][k] = Math.max(0, parseFloat(inp.value.replace(',', '.')) || 0); salvarSessao(); }));
   if (entrando && pend) setTimeout(() => { const el = $('#tsEx' + pend[0]); if (el) el.scrollIntoView({block: 'center', behavior: RM.matches ? 'auto' : 'smooth'}); }, 350);
 }
 function telaResumo(){
@@ -536,6 +549,7 @@ const ACT_TREINO = {
   tsVoltar: () => { delete sessao.fimEm; salvarSessao(); renderSessao(true); },
   tsInt: el => { sessao.int = el.dataset.v; el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); const k = $('#trKcal'); if (k) k.textContent = fmt(kcalTreino(tempoAtivo(sessao), pesoAtual() || num('trPeso'), sessao.int)); },
   tsSalvar: () => {
+    if (!sessao) return;
     const x = sessao, ms = tempoAtivo(x), kg = pesoAtual() || num('trPeso') || 75;
     const reg = {data: ymd(new Date(x.inicio)), rotinas: [x.rotinaId], rotinaId: x.rotinaId, nome: x.nome, inicio: x.inicio, duracao: Math.round(ms / 1000), series: feitasSeries(x), seriesTotal: totSeries(x),
       volume: volume(x), int: x.int || 'moderado', pesoCalc: kg, kcal: kcalTreino(ms, kg, x.int), exs: x.exs.map(e => ({nome: e.nome, series: e.series.map(z => ({reps: z.reps, kg: z.kg, feita: z.feita}))}))};
@@ -547,8 +561,11 @@ const ACT_TREINO = {
   tsDescartar: () => { if ($('#tsCfm')) { sessao = null; salvarSessao(); fecharSessao(); render(false); toast('Treino descartado'); return; }
     const b = document.querySelector('[data-act=tsDescartar]'); b.insertAdjacentHTML('afterend', '<div class="confirm" id="tsCfm" style="width:100%"><b>Descartar este treino? Nada será salvo.</b><div class="btnrow"><button class="btn sec" data-act="tsCfmNo">Manter</button><button class="btn dan" data-act="tsDescartar">Descartar</button></div></div>'); },
   tsCfmNo: () => { const c = $('#tsCfm'); c && c.remove(); },
-  delTreinoFeito: el => { S.treinos.feitos = S.treinos.feitos.filter(f => String(f.inicio || f.data) !== el.dataset.v); save('treinos'); render(false); toast('Registro apagado'); },
-  diaTreino: el => { const d = el.dataset.v; if (d > today()) return; if (treinoFeito(d)) { S.treinos.feitos = S.treinos.feitos.filter(f => f.data !== d); toast('Treino desmarcado em ' + ddmm(d)); } else { S.treinos.feitos.push({data: d, rotinas: rotinasDe(d).map(r => r.id)}); toast('Treino marcado em ' + ddmm(d)); } save('treinos'); render(false); },
+  delTreinoFeito: el => { if (!confirm('Apagar este treino registrado? Isso não pode ser desfeito.')) return; S.treinos.feitos = S.treinos.feitos.filter(f => String(f.inicio || f.data) !== el.dataset.v); save('treinos'); render(false); toast('Registro apagado'); },
+  diaTreino: el => { const d = el.dataset.v; if (d > today()) return; if (treinoFeito(d)) {
+    const completos = S.treinos.feitos.filter(f => f.data === d && (f.duracao || f.series));
+    if (completos.length && !confirm(`Desmarcar ${ddmm(d)} apaga ${completos.length > 1 ? 'os treinos registrados' : 'o treino registrado'} nesse dia (séries, tempo e calorias). Continuar?`)) return;
+    S.treinos.feitos = S.treinos.feitos.filter(f => f.data !== d); toast('Treino desmarcado em ' + ddmm(d)); } else { S.treinos.feitos.push({data: d, rotinas: rotinasDe(d).map(r => r.id)}); toast('Treino marcado em ' + ddmm(d)); } save('treinos'); render(false); },
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden && sessao && !$('#treinoWrap')?.hidden) { pedirTelaLigada(); tickSessao(); } });
 
@@ -693,7 +710,7 @@ function generoPorNome(nome){
   return null;
 }
 const generoAtual = () => (S.prefs && S.prefs.genero) || generoPorNome(me && me.displayName);
-const antec = () => { const p = S.prefs || {}; return p.antec != null ? +p.antec : 15; };
+const antec = () => { const p = S.prefs || {}, v = +p.antec; return p.antec != null && isFinite(v) && v >= 0 ? v : 15; };
 const lembreteAuto = () => !(S.prefs && S.prefs.lembreteAuto === false);
 const generoTxt = (t, g) => t.replace(/\{([^|}]*)\|([^}]*)\}/g, (_, m, f) => g === 'f' ? f : m);
 function fraseDoMomento(){
@@ -757,7 +774,6 @@ const ALIMENTOS = [
   ['Refrigerante Coca-Cola',42,0,10.6,0,'lata (350 ml)',350],['Refrigerante Coca-Cola Sem Açúcar',0,0,0,0,'lata (350 ml)',350],['Refrigerante Guaraná Antarctica',38,0,9.5,0,'lata (350 ml)',350],['Refrigerante Guaraná Antarctica Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Guaraná Antarctica Black',42,0,10.5,0,'lata (350 ml)',350],['Refrigerante Pepsi',42,0,10.4,0,'lata (350 ml)',350],['Refrigerante Pepsi Black (zero)',0,0,0,0,'lata (350 ml)',350],['Refrigerante Pepsi Twist',42,0,10.4,0,'lata (350 ml)',350],['Refrigerante Fanta Laranja',44,0,11.0,0,'lata (350 ml)',350],['Refrigerante Fanta Laranja Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Fanta Uva',46,0,11.5,0,'lata (350 ml)',350],['Refrigerante Fanta Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Fanta Maracujá',42,0,10.5,0,'lata (350 ml)',350],['Refrigerante Sprite',33,0,8.3,0,'lata (350 ml)',350],['Refrigerante Sprite Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Kuat',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Kuat Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Schweppes Citrus',38,0,9.5,0,'lata (350 ml)',350],['Refrigerante Schweppes Citrus Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Schweppes Água Tônica',36,0,9.0,0,'lata (350 ml)',350],['Refrigerante Schweppes Ginger Ale',34,0,8.6,0,'lata (350 ml)',350],['Refrigerante Água Tônica Antarctica',36,0,9.0,0,'lata (350 ml)',350],['Refrigerante Água Tônica Antarctica Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Soda Limonada Antarctica',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Soda Limonada Antarctica Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Sukita Laranja',44,0,11.0,0,'lata (350 ml)',350],['Refrigerante Sukita Uva',44,0,11.0,0,'lata (350 ml)',350],['Refrigerante H2OH! Limão',7,0,1.7,0,'lata (350 ml)',350],['Refrigerante Mineirinho',38,0,9.5,0,'lata (350 ml)',350],['Refrigerante Guaraná Jesus',42,0,10.5,0,'lata (350 ml)',350],['Refrigerante Guaraná Baré',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Guaraná Taí',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Dolly Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Dolly Laranja',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Dolly Limão',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Itubaína',42,0,10.4,0,'lata (350 ml)',350],['Refrigerante Convenção Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Pureza Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Cini Framboesa',42,0,10.5,0,'lata (350 ml)',350],['Refrigerante Cini Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Charrua Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Schin Guaraná',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Schin Guaraná Zero',0,0,0,0,'lata (350 ml)',350],['Refrigerante Schin Cola',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Schin Laranja',42,0,10.5,0,'lata (350 ml)',350],['Refrigerante Schin Limão',38,0,9.5,0,'lata (350 ml)',350],['Refrigerante Grapette',44,0,11.0,0,'lata (350 ml)',350],['Refrigerante Crush Laranja',44,0,11.0,0,'lata (350 ml)',350],['Refrigerante Guaraná Real',40,0,10.0,0,'lata (350 ml)',350],['Refrigerante Mate Couro',36,0,9.0,0,'lata (350 ml)',350],['Cerveja pilsen',41,0.6,3.3,0,'lata (350 ml)',350],
   ['Cerveja Brahma, 4,8%',41,0.4,3.2,0,'lata (350 ml)',350],['Cerveja Brahma Duplo Malte, 4,7%',41,0.4,3.4,0,'lata (350 ml)',350],['Cerveja Skol, 4,7%',39,0.4,2.9,0,'lata (350 ml)',350],['Cerveja Antarctica Pilsen, 4,7%',41,0.4,3.3,0,'lata (350 ml)',350],['Cerveja Original, 4,9%',43,0.4,3.6,0,'lata (350 ml)',350],['Cerveja Itaipava, 4,5%',38,0.4,3.0,0,'lata (350 ml)',350],['Cerveja Heineken, 5,0%',42,0.5,3.2,0,'lata (350 ml)',350],['Cerveja Amstel, 4,6%',39,0.4,3.1,0,'lata (350 ml)',350],['Cerveja Budweiser, 5,0%',42,0.4,3.3,0,'lata (350 ml)',350],['Cerveja Stella Artois, 5,0%',43,0.4,3.4,0,'lata (350 ml)',350],['Cerveja Corona, 4,5%',42,0.4,4.0,0,'long neck (330 ml)',330],['Cerveja Spaten, 5,2%',45,0.4,3.6,0,'lata (350 ml)',350],['Cerveja Devassa, 4,8%',41,0.4,3.3,0,'lata (350 ml)',350],['Cerveja Eisenbahn Pilsen, 4,8%',42,0.4,3.5,0,'lata (350 ml)',350],['Cerveja Petra, 4,8%',42,0.4,3.4,0,'lata (350 ml)',350],['Cerveja Crystal, 4,5%',38,0.4,3.0,0,'lata (350 ml)',350],['Cerveja Nova Schin, 4,7%',40,0.4,3.0,0,'lata (350 ml)',350],['Cerveja Kaiser, 4,5%',38,0.4,2.8,0,'lata (350 ml)',350],['Cerveja Império, 4,5%',39,0.4,3.2,0,'lata (350 ml)',350],['Cerveja Michelob Ultra, 3,5%',23,0.2,0.7,0,'lata (350 ml)',350]
 ];
-const alimentosTodos = () => ALIMENTOS.map(a => ({nome:a[0], k:a[1], p:a[2], c:a[3], g:a[4], pn:a[5], pg:a[6]})).concat((S.alimentacao.meus || []).map(m => Object.assign({meu:true}, m)));
 // Base completa (TBCA + TACO), carregada só quando a tela de refeição abre
 let BASE = null, baseLoading = null;
 const normBusca = t => String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
@@ -865,11 +881,28 @@ function cardCursos(){
   </section>`;
 }
 /* ---------- VGV ---------- */
-const parseBRL = t => { const v = String(t||'').replace(/[^\d,.-]/g,''); if (!v) return 0; const n = v.includes(',') ? v.replace(/\./g,'').replace(',', '.') : (/\.\d{3}($|\.)/.test(v) ? v.replace(/\./g,'') : v); return Math.max(0, parseFloat(n) || 0); };
+// Valor em R$ como o corretor digita: "450.000", "450 mil", "1,2 mi", "350k", "R$ 1.250.000,50", "350,000".
+function parseBRL(t){
+  const txt = String(t || '').toLowerCase();
+  if (/-\s*\d/.test(txt)) return 0;                                    // valor negativo não existe
+  const mult = /\bmi\b|\bmilh/.test(txt) ? 1e6 : /\bmil\b|\bk\b|\dk\b/.test(txt) ? 1e3 : 1;
+  let v = txt.replace(/[^\d,.]/g, ''); if (!v) return 0;
+  if (v.includes(',') && v.includes('.')) v = v.lastIndexOf(',') > v.lastIndexOf('.') ? v.replace(/\./g, '').replace(',', '.') : v.replace(/,/g, '');
+  else if (v.includes(',')) v = /^\d{1,3}(,\d{3})+$/.test(v) && mult === 1 ? v.replace(/,/g, '') : v.replace(/,/g, '.');     // "350,000" = 350 mil
+  else if (/^\d{1,3}(\.\d{3})+$/.test(v) && mult === 1) v = v.replace(/\./g, '');                                       // "450.000"
+  else if ((v.match(/\./g) || []).length > 1) v = v.replace(/\.(?=.*\.)/g, '');                                          // "3.500.00" → 3500.00
+  const n = parseFloat(v) * mult; return isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+}
 const brl = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL', maximumFractionDigits:0});
-const brlCurto = v => v >= 1e6 ? 'R$ ' + fmt(v / 1e6, v >= 1e7 ? 1 : 2) + ' mi' : v >= 1e3 ? 'R$ ' + fmt(v / 1e3) + ' mil' : brl(v);
-const dataVenda = c => c.vendaEm || ((c.historico || []).filter(h => h.para === 'Venda').map(h => h.em.slice(0,10)).pop()) || (c.criado || '').slice(0,10);
+const brlCurto = v => v >= 999500 ? 'R$ ' + fmt(v / 1e6, v >= 1e7 ? 1 : 2) + ' mi' : v >= 1e3 ? 'R$ ' + fmt(v / 1e3) + ' mil' : brl(v);
+const dataVenda = c => c.vendaEm || ((c.historico || []).filter(h => h.para === 'Venda').map(h => ymd(new Date(h.em))).pop())  /* data local (SP), não a de UTC */ || (c.criado || '').slice(0,10);
 function marcarVenda(c){ if (c.etapa === 'Venda') { if (!c.vendaEm) c.vendaEm = today(); } else delete c.vendaEm; }
+// Único lugar que muda a etapa do funil: registra no histórico e acerta a data da venda.
+function mudarEtapa(c, nova){
+  if (!nova || c.etapa === nova) return false;
+  (c.historico = c.historico || []).push({de: c.etapa || '', para: nova, em: new Date().toISOString()});
+  c.etapa = nova; marcarVenda(c); return true;
+}
 function vgv(lista){
   const t = today(), mes = t.slice(0,7), ano = t.slice(0,4), vendas = lista.filter(c => c.etapa === 'Venda');
   const soma = arr => arr.reduce((a, c) => a + (+c.valor || 0), 0);
@@ -895,6 +928,13 @@ function cardVGV(){
 /* ---------- fechamentos por mês ---------- */
 const MESES_LONGO = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const nomeMes = ym => { const [y, m] = ym.split('-').map(Number); return MESES_LONGO[m - 1] + ' de ' + y; };
+// Soma meses a uma data AAAA-MM-DD sem pular mês: 31/01 + 1 mês = 28/02 (ou 29 no bissexto).
+function somaMesesData(data, n){
+  const [y, m, d] = data.split('-').map(Number), alvo = new Date(y, m - 1 + n, 1);
+  const ultimo = new Date(alvo.getFullYear(), alvo.getMonth() + 1, 0).getDate();
+  return ymd(new Date(alvo.getFullYear(), alvo.getMonth(), Math.min(d, ultimo)));
+}
+const REPETICOES = {1: 13, 7: 11, 14: 5, 30: 5}; // repetir a cada N dias → quantas cópias criar
 const somaMes = (ym, n) => { const [y, m] = ym.split('-').map(Number), d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
 const vendas = () => CLI().filter(c => c.etapa === 'Venda');
 function sheetFechamentos(ym){
@@ -1232,19 +1272,27 @@ function sheetAjustes(){
 }
 
 /* ================= sheets ================= */
-let sheetCb = null;
+let sheetCb = null, sheetGen = 0, sheetNoHistorico = false;
 function openSheet(title, html, onMount){
+  sheetGen++;                                   // cada sheet aberta tem um número; fechamentos atrasados de outra não a afetam
   $('#sheetTitle').textContent = title; $('#sheetBody').innerHTML = html;
   const w = $('#sheetWrap'); w.hidden = false;
+  // botão "voltar" do celular fecha a sheet em vez de sair do app
+  if (!sheetNoHistorico) { try { history.pushState({focoSheet: sheetGen}, ''); sheetNoHistorico = true; } catch(e) {} }
   $('#sheetBody').querySelectorAll('.seg').forEach(placeThumb);
   requestAnimationFrame(() => requestAnimationFrame(() => w.classList.add('open')));
   sheetCb = onMount ? onMount($('#sheetBody')) : null;
   setTimeout(() => { const f = $('#sheetBody').querySelector('[autofocus]'); if (f) f.focus(); }, 380);
 }
-function closeSheet(){
-  const w = $('#sheetWrap'); if (w.hidden) return; w.classList.remove('open');
-  setTimeout(() => { w.hidden = true; $('#sheetBody').innerHTML = ''; }, RM.matches ? 0 : 420);
+// closeSheet(gen): só fecha se a sheet aberta ainda for a de número "gen" (um salvamento lento não fecha a sheet nova).
+function closeSheet(gen){
+  const w = $('#sheetWrap'); if (w.hidden) return;
+  if (typeof gen === 'number' && gen !== sheetGen) return;
+  const minha = sheetGen; w.classList.remove('open');
+  setTimeout(() => { if (sheetGen !== minha) return; w.hidden = true; $('#sheetBody').innerHTML = ''; }, RM.matches ? 0 : 420);
 }
+// Uma única entrada extra no histórico: o "voltar" consome ela fechando a sheet (ou, sem sheet aberta, só a descarta).
+addEventListener('popstate', () => { if (!sheetNoHistorico) return; sheetNoHistorico = false; closeSheet(); });
 addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 function prodOptions(cur, byName){
   const v = p => byName ? p.nome : p.id;
@@ -1311,7 +1359,7 @@ function blocoVisita(c, novo){
     <div class="sec-row"><b>Visita</b>${feitas.length ? `<span class="pill ok">${feitas.length} ${feitas.length === 1 ? 'efetuada' : 'efetuadas'}</span>` : ''}</div>
     ${prox.map(a => `<div class="row" style="padding:0;border:0">${ic('agenda','s')}<div class="grow"><div class="t" style="font-weight:600">${esc(a.titulo)}</div><div class="s">${parseD(a.inicio).toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'})}, ${a.inicio.slice(11,16)}${a.local ? ' · ' + esc(a.local) : ''}${a.inicio < now ? ' · <span class="down">já passou</span>' : ''}</div></div>
       <button type="button" class="mini" data-act="visitaFeita" data-id="${a.id}" data-c="${c.id}">Efetuada</button></div>`).join('')}
-    <div id="vForm" ${prox.length || novo ? '' : ''}hidden>
+    <div id="vForm" hidden>
       <div class="form">
         <div class="field"><label for="vTipo">Tipo</label><select class="inp" id="vTipo">${TIPOS_VISITA.map(x => opt(x, x, 'Visita ao decorado')).join('')}</select></div>
         <div class="field"><label for="vDia">Dia</label><input class="inp" id="vDia" type="date" value="${am}" min="${t}"></div>
@@ -1328,6 +1376,11 @@ function blocoVisita(c, novo){
 }
 async function saveCliente(form){
   const id = form.dataset.id, novo = !id;
+  // validações primeiro: se algo falta, nada é alterado nem duplicado
+  if (!val('cNome')) return toast('Digite o nome do cliente.', true);
+  const vf0 = $('#vForm');
+  if (vf0 && !vf0.hidden && (!val('vDia') || !val('vHora'))) return toast('Escolha o dia e a hora da visita.', true);
+  const gen = sheetGen;
   const c = novo ? {id: uid(), criado: new Date().toISOString(), contatos: []} : findCli(id);
   const etapaAnt = c.etapa;
   const corNome = val('cCor');
@@ -1335,29 +1388,37 @@ async function saveCliente(form){
   if (c._recebido) c.corretorNome = corNome;
   else { cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
     if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); } }
-  Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, etapa: val('cEtapa'), temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
+  Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
+  if (etapaAnt) mudarEtapa(c, val('cEtapa')); else c.etapa = val('cEtapa');
   marcarVenda(c); if (c.etapa === 'Venda' && val('cVenda')) c.vendaEm = val('cVenda');
-  if (etapaAnt && etapaAnt !== c.etapa) (c.historico = c.historico || []).push({de: etapaAnt, para: c.etapa, em: new Date().toISOString()});
   if (novo) S.clientes.push(c);
   const wantCal = $('#cCal').classList.contains('on');
   const vf = $('#vForm'), querVisita = vf && !vf.hidden;
   let visita = null;
   if (querVisita) {
-    if (!val('vDia') || !val('vHora')) return toast('Escolha o dia e a hora da visita.', true);
     const parts = [me.uid, ...[...document.querySelectorAll('#vPeople .chip.on')].map(b => b.dataset.v)];
     visita = {titulo: val('vTipo'), cliente: c.nome, clienteId: c.id, produto: P(c.produtoId).nome !== 'Sem produto' ? P(c.produtoId).nome : '', inicio: val('vDia') + 'T' + val('vHora'), duracao: +val('vDur') || 60,
       local: val('vLocal'), notas: [c.fone && 'Telefone do cliente: ' + c.fone, c.notas].filter(Boolean).join('\n'), participantes: [...new Set(parts)], emailsExtras: '', convite: $('#vCal').classList.contains('on'), criadoPor: me.uid, status: 'ativo', atualizado: Date.now()};
-    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita agendada')) { (c.historico = c.historico || []).push({de: c.etapa, para: 'Visita agendada', em: new Date().toISOString()}); c.etapa = 'Visita agendada'; }
   }
   const btn = $('#cSave'); btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Salvando';
   if ((wantCal || (visita && visita.convite)) && !hasTok()) { try { await requestTok(); } catch(e) {} }
-  try { await syncClienteCal(c, wantCal); } catch(e) { toast('Cliente salvo, mas a agenda falhou: ' + e.message, true); }
+  // Sem token, não tenta de novo fora do toque (o navegador bloqueia o popup): avisa que o lembrete não foi.
+  let avisoAgenda = '';
+  if (wantCal && !hasTok() && c.lembrete && ATIVAS.includes(c.etapa)) avisoAgenda = 'o lembrete não foi para a Google Agenda (agenda não conectada)';
+  else { try { await syncClienteCal(c, wantCal); } catch(e) { avisoAgenda = 'o lembrete não foi para a Google Agenda: ' + e.message; } }
   salvarCli(c);
+  const fechar = () => { closeSheet(gen); render(false); };
   if (visita) {
-    try { await gravarAtend(visita, null, []); delete gcache[visita.inicio.slice(0,10)]; closeSheet(); render(false); toast(`Visita de ${c.nome} agendada para ${ddmm(visita.inicio)} às ${visita.inicio.slice(11,16)}`); return; }
-    catch(e) { closeSheet(); render(false); toast('Cliente salvo, mas a visita não foi agendada: ' + e.message, true); return; }
+    if (visita.convite && !hasTok()) visita.convite = false;
+    try { await gravarAtend(visita, null, []); delete gcache[visita.inicio.slice(0,10)];
+      if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita agendada')) { mudarEtapa(c, 'Visita agendada'); salvarCli(c); }
+      fechar();
+      toast(`Visita de ${c.nome} agendada para ${ddmm(visita.inicio)} às ${visita.inicio.slice(11,16)}` + (avisoAgenda ? ', mas ' + avisoAgenda : ''), !!avisoAgenda); return; }
+    catch(e) { fechar(); toast('Cliente salvo, mas a visita não foi agendada: ' + e.message, true); return; }
   }
-  closeSheet(); render(false); toast(novo ? 'Cliente adicionado' : 'Cliente atualizado');
+  fechar();
+  if (avisoAgenda) toast((novo ? 'Cliente adicionado' : 'Cliente atualizado') + ', mas ' + avisoAgenda, true);
+  else toast(novo ? 'Cliente adicionado' : 'Cliente atualizado');
 }
 async function syncClienteCal(c, want){
   if (want && c.lembrete && ATIVAS.includes(c.etapa)) {
@@ -1448,8 +1509,14 @@ async function gravarAtend(data, old, extras){
       try { await cal(`calendars/primary/events/${old.eventId}?sendUpdates=all`, {method: 'DELETE'}); } catch(e) {}
       Object.assign(data, {eventId: null, iCalUID: null, htmlLink: null});
     }
-    if (!old) { data.criado = Date.now(); await fdb.collection('atendimentos').add(data); }
-    else await fdb.doc('atendimentos/' + old.id).update(data);
+    try {
+      if (!old) { data.criado = Date.now(); await fdb.collection('atendimentos').add(data); }
+      else await fdb.doc('atendimentos/' + old.id).update(data);
+    } catch(e) {
+      // o evento acabou de ser criado agora e o Foco não gravou: apaga para não sobrar convite órfão nem duplicar na nova tentativa
+      if (data.convite && data.eventId && !(old && old.eventId)) { try { await cal(`calendars/primary/events/${data.eventId}?sendUpdates=all`, {method: 'DELETE'}); } catch(_) {} }
+      throw e;
+    }
   }
 }
 
@@ -1494,6 +1561,8 @@ async function syncTarefaCal(x, want){
 }
 async function saveTarefa(form){
   const id = form.dataset.id, tipo = form.dataset.tipo, novo = !id;
+  if (!val('tTit')) return toast('Digite um título.', true);
+  const gen = sheetGen;
   const x = novo ? {id: uid(), tipo, criado: today()} : find(S.tarefas, id);
   Object.assign(x, {titulo: val('tTit'), data: val('tDia'), hora: val('tHora'), categoria: val('tCat'), notas: val('tNotas')});
   if (tipo === 'compromisso') Object.assign(x, {duracao: +val('tDur') || 60, local: val('tLocal'), repetir: val('tRep')}); else x.prioridade = val('tPri');
@@ -1503,12 +1572,13 @@ async function saveTarefa(form){
   if (want && !hasTok()) { try { await requestTok(); } catch(e) {} }
   const reps = novo && +val('tRep') ? +val('tRep') : 0;
   const lista = [x];
-  if (reps) { const n = reps === 1 ? 13 : reps === 7 ? 11 : reps === 14 ? 5 : 5; for (let i = 1; i <= n; i++) { const d = reps === 30 ? (dd => { const z = parseD(x.data); z.setMonth(z.getMonth() + i); return ymd(z); })() : addDays(x.data, reps * i); lista.push(Object.assign({}, x, {id: uid(), data: d, calEventId: null, serie: x.id})); } x.serie = x.id; }
-  let falhou = false;
-  for (const it of lista) { try { await syncTarefaCal(it, want); } catch(e) { falhou = true; } }
+  if (reps) { const n = REPETICOES[reps] || 5; for (let i = 1; i <= n; i++) { const d = reps === 30 ? somaMesesData(x.data, i) : addDays(x.data, reps * i); lista.push(Object.assign({}, x, {id: uid(), data: d, calEventId: null, serie: x.id})); } x.serie = x.id; }
+  // Sem agenda conectada: não tenta (cada tentativa abriria um popup). Na primeira falha, para.
+  let falhou = want && !hasTok();
+  if (!falhou) for (const it of lista) { try { await syncTarefaCal(it, want); } catch(e) { falhou = true; break; } }
   if (novo) S.tarefas.push(...lista);
   save('tarefas'); ui.agendaDia = x.data; delete gcache[x.data];
-  closeSheet(); render(false);
+  closeSheet(gen); render(false);
   toast(falhou ? 'Salvo no Foco, mas a Google Agenda falhou' : (novo ? (tipo === 'compromisso' ? 'Compromisso salvo' : 'Tarefa criada') + (reps ? ` com ${lista.length} repetições` : '') : 'Atualizado'), falhou);
 }
 function sheetRotina(r){
@@ -1536,10 +1606,11 @@ function sheetRefeicao(){
     <div class="card" style="box-shadow:none;padding:12px 14px"><div class="list" id="mItens"></div></div>
     <div class="card" style="box-shadow:none;display:grid;gap:6px;background:var(--accent-soft)" id="mTot"></div>
     <button type="button" class="link small" data-act="mealManual" style="justify-self:start">Não achou? Cadastrar alimento</button>
+    <!-- campos do cadastro manual ficam fora do formulário da refeição: um valor inválido aqui não trava "Adicionar refeição" -->
     <div id="mManual" hidden class="card" style="box-shadow:none;display:grid;gap:10px">
-      <div class="field"><label for="xN">Nome do alimento</label><input class="inp" id="xN" placeholder="Ex.: Marmita do restaurante"></div>
-      <div class="f2"><div class="field"><label for="xPn">Porção</label><input class="inp" id="xPn" value="porção"></div><div class="field"><label for="xK">Calorias da porção</label><input class="inp num" id="xK" type="number" inputmode="decimal" min="0" placeholder="kcal"></div></div>
-      <div class="f3"><div class="field"><label for="xP">Proteína (g)</label><input class="inp num" id="xP" type="number" inputmode="decimal" min="0" value="0"></div><div class="field"><label for="xC">Carbo (g)</label><input class="inp num" id="xC" type="number" inputmode="decimal" min="0" value="0"></div><div class="field"><label for="xG">Gordura (g)</label><input class="inp num" id="xG" type="number" inputmode="decimal" min="0" value="0"></div></div>
+      <div class="field"><label for="xN">Nome do alimento</label><input class="inp" id="xN" form="foraDoForm" placeholder="Ex.: Marmita do restaurante"></div>
+      <div class="f2"><div class="field"><label for="xPn">Porção</label><input class="inp" id="xPn" form="foraDoForm" value="porção"></div><div class="field"><label for="xK">Calorias da porção</label><input class="inp num" id="xK" form="foraDoForm" step="any" type="number" inputmode="decimal" min="0" placeholder="kcal"></div></div>
+      <div class="f3"><div class="field"><label for="xP">Proteína (g)</label><input class="inp num" id="xP" form="foraDoForm" step="any" type="number" inputmode="decimal" min="0" value="0"></div><div class="field"><label for="xC">Carbo (g)</label><input class="inp num" id="xC" form="foraDoForm" step="any" type="number" inputmode="decimal" min="0" value="0"></div><div class="field"><label for="xG">Gordura (g)</label><input class="inp num" id="xG" form="foraDoForm" step="any" type="number" inputmode="decimal" min="0" value="0"></div></div>
       <p class="small muted" style="margin:0">Use o rótulo da embalagem. Se deixar as calorias em branco, calculo pelos macros. O alimento fica salvo para as próximas vezes.</p>
       <button type="button" class="btn sec" data-act="mealSalvarMeu">Salvar e adicionar</button>
     </div>
@@ -1564,7 +1635,7 @@ function drawMeal(){
       <select class="inp" style="height:36px;flex:1;min-width:0" data-mu="${i}" aria-label="Unidade"><option value="p"${it.un !== 'g' ? ' selected' : ''}>${esc(it.pn)} (${fmt(it.pg)} g)</option><option value="g"${it.un === 'g' ? ' selected' : ''}>gramas</option></select></div></div>
       <button type="button" class="round ghost" data-act="mealDel" data-v="${i}" aria-label="Remover">${ic('x','s')}</button></div>`; }).join('')
     : '<p class="small muted" style="margin:0">Nenhum alimento ainda. Busque acima.</p>';
-  box.querySelectorAll('[data-mq]').forEach(el => el.addEventListener('input', () => { mealItens[+el.dataset.mq].q = parseFloat(el.value.replace(',', '.')) || 0; drawTot(); el.closest('.row').querySelector('.s').textContent = (v => `${fmt(v.k)} kcal · P ${fmt(v.p)} · C ${fmt(v.c)} · G ${fmt(v.g)}`)(itemVals(mealItens[+el.dataset.mq])); }));
+  box.querySelectorAll('[data-mq]').forEach(el => el.addEventListener('input', () => { mealItens[+el.dataset.mq].q = Math.max(0, parseFloat(el.value.replace(',', '.')) || 0); drawTot(); el.closest('.row').querySelector('.s').textContent = (v => `${fmt(v.k)} kcal · P ${fmt(v.p)} · C ${fmt(v.c)} · G ${fmt(v.g)}`)(itemVals(mealItens[+el.dataset.mq])); }));
   box.querySelectorAll('[data-mu]').forEach(el => el.addEventListener('change', () => { const it = mealItens[+el.dataset.mu]; const gr = itemVals(it).gr; it.un = el.value; it.q = it.un === 'g' ? Math.round(gr) : +(gr / it.pg).toFixed(1); drawMeal(); }));
   drawTot();
 }
@@ -1656,13 +1727,13 @@ function sheetLivro(l){
   const t = $('#bT'); let tmr, seq = 0;
   t.addEventListener('input', () => {
     clearTimeout(tmr); const q = t.value.trim();
-    if (q.length < 3) { $('#bRes').innerHTML = ''; $('#bStatus').textContent = ''; return; }
-    $('#bStatus').textContent = 'Buscando…';
+    if (q.length < 3) { ($('#bRes') || {}).innerHTML = ''; ($('#bStatus') || {}).textContent = ''; return; }
+    ($('#bStatus') || {}).textContent = 'Buscando…';
     tmr = setTimeout(async () => {
       const my = ++seq;
-      try { livroRes = await buscarLivros(q); } catch(e) { livroRes = []; if (my === seq) $('#bStatus').textContent = navigator.onLine === false ? 'Sem internet. Preencha os dados à mão.' : 'As bases de livros não responderam. Tente de novo em instantes ou preencha à mão.'; console.warn('busca de livros', e); return; }
+      try { livroRes = await buscarLivros(q); } catch(e) { livroRes = []; if (my === seq) ($('#bStatus') || {}).textContent = navigator.onLine === false ? 'Sem internet. Preencha os dados à mão.' : 'As bases de livros não responderam. Tente de novo em instantes ou preencha à mão.'; console.warn('busca de livros', e); return; }
       if (my !== seq) return;
-      $('#bStatus').textContent = livroRes.length ? 'Toque no livro certo para preencher' : 'Nenhum livro encontrado. Preencha à mão.';
+      ($('#bStatus') || {}).textContent = livroRes.length ? 'Toque no livro certo para preencher' : 'Nenhum livro encontrado. Preencha à mão.';
       $('#bRes').innerHTML = livroRes.map((b, i) => `<button type="button" class="row rowbtn livro-res" data-act="pickLivro" data-v="${i}">${capaHTML(b, 40)}<span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(b.titulo)}</span><span class="s">${esc([b.autor, b.ano, b.paginas ? b.paginas + ' pág.' : ''].filter(Boolean).join(' · '))}</span></span></button>`).join('');
     }, 380);
   });
@@ -1741,8 +1812,7 @@ const ACT = {
   },
   avancar: el => {
     const c = findCli(el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= VI) return;
-    (c.historico = c.historico || []).push({de: c.etapa, para: ETAPAS[i+1], em: new Date().toISOString()});
-    c.etapa = ETAPAS[i+1]; marcarVenda(c); salvarCli(c); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
+    mudarEtapa(c, ETAPAS[i+1]); salvarCli(c); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
   },
   novoCliente: () => sheetCliente(null),
   visitaToggle: async () => {
@@ -1755,7 +1825,7 @@ const ACT = {
   visitaFeita: async el => {
     const a = find(atend, el.dataset.id), c = findCli(el.dataset.c); if (!a || !c) return;
     try { await fdb.doc('atendimentos/' + a.id).update({status: 'realizado', atualizado: Date.now()}); } catch(e) { return toast('Não deu para marcar: ' + e.message, true); }
-    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita efetuada')) { (c.historico = c.historico || []).push({de: c.etapa, para: 'Visita efetuada', em: new Date().toISOString()}); c.etapa = 'Visita efetuada'; salvarCli(c); }
+    if (ETAPAS.indexOf(c.etapa) < ETAPAS.indexOf('Visita efetuada')) { mudarEtapa(c, 'Visita efetuada'); salvarCli(c); }
     closeSheet(); render(false); toast(`Visita de ${c.nome} efetuada`);
   },
   abrirCliente: el => sheetCliente(findCli(el.dataset.id)),
@@ -1822,11 +1892,10 @@ const ACT = {
   subcorpo: el => { ui.corpo = el.dataset.v; render(true); },
   subestudos: el => { ui.estudos = el.dataset.v; render(true); },
   pesoPer: el => { ui.pesoPeriodo = +el.dataset.v; render(false); },
-  delPeso: el => { S.peso.items = S.peso.items.filter(p => p.data !== el.dataset.v); save('peso'); render(false); toast('Registro apagado'); },
+  delPeso: el => { if (!confirm(`Apagar o peso de ${ddmm(el.dataset.v)}?`)) return; S.peso.items = S.peso.items.filter(p => p.data !== el.dataset.v); save('peso'); render(false); toast('Registro apagado'); },
   novaRotina: () => sheetRotina(null),
   editRotina: el => sheetRotina(find(S.treinos.rotinas, el.dataset.id)),
   delRotina: el => { S.treinos.rotinas = S.treinos.rotinas.filter(r => r.id !== el.dataset.id); save('treinos'); closeSheet(); render(false); toast('Rotina excluída'); },
-  treinoFeito: () => toggleTreino(), treinoAvulso: () => toggleTreino(),
   novaRefeicao: () => sheetRefeicao(),
   repMeal: el => { const m = find(S.alimentacao.refeicoes, el.dataset.v); if (!m) return; $('#mNome').value = m.nome; mealItens = m.itens.map(i => Object.assign({}, i)); drawMeal(); },
   mealAdd: el => { const a = mealRes[+el.dataset.v]; if (!a) return; mealItens.push({nome:a.principal || a.nome, k:a.k, p:a.p, c:a.c, g:a.g, pn:a.pn, pg:a.pg, q: a.q100 ? 100 : 1, un: a.q100 ? 'g' : 'p'}); $('#mBusca').value = ''; $('#mRes').innerHTML = ''; drawMeal(); const last = $('#mItens').lastElementChild; if (last && !RM.matches) last.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'none'}], {duration: 320}); },
@@ -1834,13 +1903,15 @@ const ACT = {
   mealManual: () => { const b = $('#mManual'); b.hidden = !b.hidden; if (!b.hidden) $('#xN').focus(); },
   mealSalvarMeu: () => {
     const nome = val('xN'); if (!nome) return toast('Dê um nome ao alimento.', true);
-    const p = num('xP'), c = num('xC'), g = num('xG'), k = num('xK') || kcalOf({p, c, g});
+    const p = num('xP'), c = num('xC'), g = num('xG'), kd = num('xK');
+    if (p < 0 || c < 0 || g < 0 || kd < 0) return toast('Calorias e macros não podem ser negativos.', true);
+    const k = kd || kcalOf({p, c, g});
     const meu = {nome, k, p, c, g, pn: val('xPn') || 'porção', pg: 100};
     S.alimentacao.meus = (S.alimentacao.meus || []).filter(m => normNome(m.nome) !== normNome(nome)).concat([meu]);
     save('alimentacao'); mealItens.push(Object.assign({q:1, un:'p'}, meu));
     ['xN','xK'].forEach(i => $('#' + i).value = ''); ['xP','xC','xG'].forEach(i => $('#' + i).value = 0); $('#mManual').hidden = true; drawMeal(); toast(nome + ' salvo nos seus alimentos');
   },
-  delRefeicao: el => { S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
+  delRefeicao: el => { if (!confirm('Apagar esta refeição?')) return; S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
   fechamentos: () => sheetFechamentos(),
   fechMes: el => { if (el.hasAttribute('disabled')) return; const sb = $('#sheetBody'), y = sb.scrollTop; sheetFechamentos(el.dataset.v || el.closest('[data-v]').dataset.v); sb.scrollTop = y; },
@@ -1869,10 +1940,10 @@ const ACT = {
     $('#bT').value = b.titulo; $('#bA').value = b.autor; if (b.paginas) $('#bP').value = b.paginas;
     $('#bRes').innerHTML = ''; $('#bInfo').innerHTML = livroCard(b);
     const card = $('#bInfo').firstElementChild; if (card && !RM.matches) card.animate([{opacity:0, transform:'scale(.97)'}, {opacity:1, transform:'none'}], {duration: 380, easing: 'cubic-bezier(.22,.8,.24,1)'});
-    $('#bStatus').textContent = b.isbn ? 'Procurando o número de capítulos…' : 'Capítulos não informados por essa edição. Preencha se quiser.';
+    ($('#bStatus') || {}).textContent = b.isbn ? 'Procurando o número de capítulos…' : 'Capítulos não informados por essa edição. Preencha se quiser.';
     const n = await capitulosDe(b.isbn);
-    if (n) { $('#bC').value = n; $('#bStatus').textContent = `${n} capítulos encontrados no sumário. Confira e ajuste se precisar.`; }
-    else if (b.isbn) $('#bStatus').textContent = 'O sumário dessa edição não está disponível. Preencha os capítulos se quiser.';
+    if (n) { $('#bC').value = n; ($('#bStatus') || {}).textContent = `${n} capítulos encontrados no sumário. Confira e ajuste se precisar.`; }
+    else if (b.isbn) ($('#bStatus') || {}).textContent = 'O sumário dessa edição não está disponível. Preencha os capítulos se quiser.';
     if (!b.paginas) $('#bP').focus();
   },
   cap: el => { const l = find(S.livros.items, el.dataset.id); if (!l || !l.capitulos) return;
@@ -1929,18 +2000,14 @@ const ACT = {
 };
 function animateList(){ const l = document.querySelector('#view .card:last-child .list, #view .card:last-child .empty'); if (l && !RM.matches) l.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 380, easing: 'cubic-bezier(.22,.8,.24,1)'}); }
 function openAtend(id){ const a = find(atend, id); if (a) sheetAtend(a); }
-function toggleTreino(){
-  const t = today();
-  if (treinoFeito(t)) { S.treinos.feitos = S.treinos.feitos.filter(f => f.data !== t); toast('Treino desmarcado'); }
-  else { S.treinos.feitos.push({data: t, rotinas: rotinasDe(t).map(r => r.id)}); toast('Treino concluído'); }
-  save('treinos'); render(false);
-}
 function addPages(id, n, abs){
   const l = find(S.livros.items, id); if (!l) return;
   const antes = l.lidas; l.lidas = Math.max(0, Math.min(l.paginas, abs != null ? abs : l.lidas + n));
   const diff = l.lidas - antes; if (diff > 0) S.livros.log.push({data: today(), livroId: id, n: diff});
   let fim = false; if (l.lidas >= l.paginas && !l.concluidoEm) { l.concluidoEm = today(); fim = true; }
-  save('livros'); render(false); toast(fim ? `Livro concluído: ${l.titulo}` : `+${diff} páginas`);
+  if (l.lidas < l.paginas && l.concluidoEm) l.concluidoEm = null;   // voltou páginas: o livro deixa de estar concluído
+  save('livros'); render(false);
+  toast(fim ? `Livro concluído: ${l.titulo}` : diff >= 0 ? `+${diff} páginas` : `Página atual: ${l.lidas} (${-diff} a menos)`);
 }
 
 const FORMS = {
@@ -1948,11 +2015,12 @@ const FORMS = {
   atend: f => saveAtend(f),
   tarefa: f => saveTarefa(f),
   peso: () => {
-    const kg = num('pesoKg'), d = val('pesoData'); if (!kg || !d) return;
+    const kg = num('pesoKg'), d = val('pesoData'); if (!d) return toast('Escolha a data.', true); if (!(kg >= 20 && kg <= 400)) return toast('Digite um peso entre 20 e 400 kg.', true);
     S.peso.items = S.peso.items.filter(p => p.data !== d); S.peso.items.push({data: d, kg: +kg.toFixed(1)});
     save('peso'); render(false); toast(`${fmt(kg, 1)} kg registrado`);
   },
   rotina: f => {
+    if (!val('rNome')) return toast('Dê um nome à rotina.', true);
     const id = f.dataset.id, r = id ? find(S.treinos.rotinas, id) : {id: uid()};
     Object.assign(r, {nome: val('rNome'), descanso: +val('rDesc') || 60, dias: [...document.querySelectorAll('#rDias .on')].map(b => +b.dataset.v), exercicios: val('rEx').split('\n').map(s => s.trim()).filter(Boolean)});
     if (!id) S.treinos.rotinas.push(r); save('treinos'); closeSheet(); render(false); toast('Rotina salva');
@@ -1966,13 +2034,14 @@ const FORMS = {
   },
   metas: () => {
     const k = num('gKcal'), pp = num('gPp'), pc = num('gPc'), pg = num('gPg');
-    if (k && pp + pc + pg !== 100) return toast('A divisão dos macros precisa somar 100%.', true);
+    if (k && Math.abs(pp + pc + pg - 100) > 0.05) return toast('A divisão dos macros precisa somar 100%.', true);
     S.peso.meta = val('gPeso') ? +num('gPeso').toFixed(1) : null;
     S.alimentacao.metas = k ? {kcal: Math.round(k), div: val('gDiv'), pp, pc, pg, p: Math.round(k * pp / 400), c: Math.round(k * pc / 400), g: Math.round(k * pg / 900)} : null;
     S.livros.meta = Math.round(num('gLiv'));
     save('peso', 'alimentacao', 'livros'); closeSheet(); render(false); toast('Metas salvas');
   },
   livro: f => {
+    if (!val('bT')) return toast('Digite o título do livro.', true);
     const id = f.dataset.id, l = id ? find(S.livros.items, id) : {id: uid(), criado: today()};
     Object.assign(l, {titulo: val('bT'), autor: val('bA'), paginas: Math.max(1, Math.round(num('bP'))), lidas: Math.round(num('bL')), prazo: val('bD'), capitulos: Math.round(num('bC')) || 0, capLidos: Math.round(num('bCL')) || 0}, Object.fromEntries(Object.entries(livroInfo || {}).filter(([, v]) => v != null && v !== '')));
     l.capLidos = Math.min(l.capLidos, l.capitulos || l.capLidos);
@@ -1981,27 +2050,45 @@ const FORMS = {
   },
   pag: f => { closeSheet(); if (val('pgA')) addPages(f.dataset.id, 0, Math.round(num('pgA'))); else addPages(f.dataset.id, Math.round(num('pgN'))); },
   curso: f => {
+    if (!val('uN')) return toast('Digite o nome do curso.', true);
     const id = f.dataset.id, c = id ? find(S.cursos.items, id) : {id: uid(), criado: today()};
     const old = c.etapas || []; const nomes = val('uE').split('\n').map(s => s.trim()).filter(Boolean);
-    Object.assign(c, {nome: val('uN'), plataforma: val('uP'), prazo: val('uD'), etapas: nomes.map(n => ({nome: n, feitaEm: (old.find(e => e.nome === n) || {}).feitaEm || null}))});
+    // casa cada etapa com a antiga pela posição entre as de mesmo nome (duas "M1" não trocam de estado entre si)
+    const usadas = new Set();
+    const etapas = nomes.map(n => { const i = old.findIndex((e, j) => e.nome === n && !usadas.has(j)); if (i >= 0) usadas.add(i); return {nome: n, feitaEm: i >= 0 ? old[i].feitaEm || null : null}; });
+    Object.assign(c, {nome: val('uN'), plataforma: val('uP'), prazo: val('uD'), etapas});
     if (!id) { S.cursos.items.push(c); ui.cursoAberto = c.id; } save('cursos'); closeSheet(); render(false); toast('Curso salvo');
   },
   produto: f => {
+    if (!val('sN')) return toast('Digite o nome do produto.', true);
     const id = f.dataset.id, p = id ? find(S.produtos, id) : {id: uid()};
     p.nome = val('sN'); p.inc = val('sInc'); p.coord = $('#sCoord').classList.contains('on'); const on = document.querySelector('#sCor .on'); p.cor = on ? on.dataset.v : PCORES[0];
     if (!id) S.produtos.push(p); save('produtos'); sheetAjustes(); render(false);
   },
   corretor: f => {
+    if (!val('sN')) return toast('Digite o nome do corretor.', true);
     const id = f.dataset.id, b = id ? find(S.corretores, id) : {id: uid()};
     b.nome = val('sN'); if (!id) S.corretores.push(b); save('corretores'); sheetAjustes(); render(false);
   }
 };
 
 Object.assign(ACT, ACT_TREINO);
+// Ações que gravam algo: um segundo toque no mesmo botão é ignorado enquanto a primeira não termina (+ 800 ms).
+const ACOES_UNICAS = new Set(['avancar','contato','visitaFeita','sairAtend','tsSalvar','tsFinalizar','mealSalvarMeu','acessoDel',
+  'delPeso','delRefeicao','delTreinoFeito','diaTreino','delCliente','delTarefa','delAtend','delRotina','delLivro','delCurso','delProduto','delCorretor']);
+const travados = new WeakSet();
+function comTrava(alvo, executar){
+  if (travados.has(alvo)) return;
+  travados.add(alvo);
+  const soltar = () => setTimeout(() => travados.delete(alvo), 800);
+  try { const r = executar(); if (r && typeof r.then === 'function') r.then(soltar, soltar); else soltar(); }
+  catch(err) { soltar(); throw err; }
+}
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const fn = ACT[el.dataset.act]; if (!fn) return;
-  e.preventDefault(); fn(el, e);
+  e.preventDefault();
+  if (ACOES_UNICAS.has(el.dataset.act)) comTrava(el, () => fn(el, e)); else fn(el, e);
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'cEtapa') { const b = $('#cVendaBox'); if (b) b.hidden = e.target.value !== 'Venda'; }
@@ -2013,7 +2100,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('submit', e => {
   const f = e.target.closest('[data-form]'); if (!f) return;
-  e.preventDefault(); const fn = FORMS[f.dataset.form]; if (fn) fn(f);
+  e.preventDefault(); const fn = FORMS[f.dataset.form]; if (fn) comTrava(f, () => fn(f));   // duplo "Salvar" não duplica
 });
 
 /* ================= login ================= */

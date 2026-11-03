@@ -11,7 +11,8 @@ self.addEventListener('push', e => {
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  const url = new URL(e.notification.data && e.notification.data.url || './', self.registration.scope).href;
+  let url = new URL(e.notification.data && e.notification.data.url || './', self.registration.scope).href;
+  if (!url.startsWith(self.registration.scope)) url = self.registration.scope;   // só abre páginas do próprio Foco
   e.waitUntil(self.clients.matchAll({type: 'window', includeUncontrolled: true}).then(list => {
     for (const c of list) { if (c.url.startsWith(self.registration.scope)) { c.navigate(url); return c.focus(); } }
     return self.clients.openWindow(url);

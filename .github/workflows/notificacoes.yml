@@ -4,16 +4,23 @@ on:
     - cron: '*/10 * * * *'
   workflow_dispatch:
 concurrency: notificacoes
+# O robô só precisa ler o código; nada de escrever no repositório.
+permissions:
+  contents: read
 jobs:
   enviar:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Actions presas por commit (não por etiqueta, que pode ser trocada)
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version: 20
-      - run: npm install --omit=dev --no-audit --no-fund
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      # Instala exatamente as versões do package-lock.json, sem rodar scripts de instalação de terceiros
+      - run: npm ci --omit=dev --no-audit --no-fund --ignore-scripts
         working-directory: robo
       - run: node enviar.mjs
         working-directory: robo

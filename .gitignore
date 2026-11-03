@@ -1,1 +1,13 @@
 robo/node_modules
+# nunca subir chaves, contas de serviço ou exportações para o repositório público
+.env
+.env.*
+*-adminsdk-*.json
+*service-account*.json
+*conta-servico*.json
+*.pem
+*.key
+backup*.json
+export*.json
+*.tmp
+.DS_Store
