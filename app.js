@@ -301,13 +301,29 @@ async function loadDirectory(){
 }
 
 /* ================= Google Agenda ================= */
-// O token da Google Agenda fica SÓ na memória: nada de sessionStorage, onde um script injetado poderia lê-lo.
+// Token da Google Agenda guardado no aparelho para não desconectar ao recarregar o app.
+// A Google faz cada token valer 1 hora; quando vence, o app renova sozinho no primeiro toque (ver renovarAgenda).
 let tok = null, tokExp = 0;
-try { sessionStorage.removeItem('foco-gtok'); } catch(e) {}   // apaga o que versões antigas deixaram
-function setTok(v, secs){ tok = v; tokExp = Date.now() + ((secs||3600) - 120) * 1000; }
+try { sessionStorage.removeItem('foco-gtok'); } catch(e) {}   // versões antigas usavam sessionStorage
+try { const t = JSON.parse(localStorage.getItem('foco-gtok') || 'null'); if (t && t.exp > Date.now()) { tok = t.v; tokExp = t.exp; } } catch(e) {}
+function setTok(v, secs){
+  tok = v; tokExp = Date.now() + ((secs||3600) - 120) * 1000;
+  try { localStorage.setItem('foco-gtok', JSON.stringify({v, exp: tokExp})); localStorage.setItem('foco-agenda', '1'); } catch(e) {}
+}
+// Se a agenda já foi conectada antes e o token venceu, renova no primeiro toque do usuário
+// (o navegador só deixa abrir a janelinha da Google dentro de um toque; como a permissão já foi dada, ela abre e fecha sozinha).
+let renovando = false;
+function renovarAgenda(){
+  let conectada = false; try { conectada = localStorage.getItem('foco-agenda') === '1'; } catch(e) {}
+  if (!me || !conectada || hasTok() || renovando || !window.google || !google.accounts || !google.accounts.oauth2) return;
+  renovando = true; requestTok().catch(() => {}).finally(() => { renovando = false; });
+}
+addEventListener('pointerdown', renovarAgenda, true);
 const hasTok = () => !!tok && Date.now() < tokExp;
+let tokPendente = null;   // pedidos ao mesmo tempo usam a mesma janela da Google
 function requestTok(){
-  return new Promise((res, rej) => {
+  if (tokPendente) return tokPendente;
+  return tokPendente = new Promise((res, rej) => {
     if (!window.google || !google.accounts || !google.accounts.oauth2) return rej(new Error('Google ainda carregando, tente de novo.'));
     const c = google.accounts.oauth2.initTokenClient({
       client_id: CFG.googleClientId, scope: SCOPE, hint: me && me.email,
@@ -315,7 +331,8 @@ function requestTok(){
       error_callback: e => rej(new Error(e.type === 'popup_closed' ? 'Janela fechada antes de liberar a agenda.' : 'Não deu para conectar a agenda.'))
     });
     c.requestAccessToken({prompt: ''});
-  });
+    setTimeout(() => rej(new Error('A janela da Google não respondeu. Tente de novo.')), 120000);   // não deixa o botão girando para sempre
+  }).finally(() => { tokPendente = null; });
 }
 async function cal(path, opts={}, retry=true){
   if (!hasTok()) await requestTok();
@@ -1996,7 +2013,7 @@ const ACT = {
     catch(e) { toast('Não deu para remover: ' + e.message, true); }
   },
   backup: async () => { const txt = JSON.stringify(S); try { await navigator.clipboard.writeText(txt); toast('Backup copiado'); } catch(e) { toast('Não deu para copiar', true); } },
-  sair: async () => { closeSheet(); if (unsubAt) unsubAt(); if (unsubSh) unsubSh(); try { sessionStorage.removeItem('foco-gtok'); } catch(e) {} tok = null; await auth.signOut(); }
+  sair: async () => { closeSheet(); if (unsubAt) unsubAt(); if (unsubSh) unsubSh(); try { localStorage.removeItem('foco-gtok'); localStorage.removeItem('foco-agenda'); } catch(e) {} tok = null; await auth.signOut(); }
 };
 function animateList(){ const l = document.querySelector('#view .card:last-child .list, #view .card:last-child .empty'); if (l && !RM.matches) l.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 380, easing: 'cubic-bezier(.22,.8,.24,1)'}); }
 function openAtend(id){ const a = find(atend, id); if (a) sheetAtend(a); }
