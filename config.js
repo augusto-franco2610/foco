@@ -12,6 +12,8 @@ window.FOCO_CONFIG = {
   // ID do cliente OAuth "Web client (auto created by Google Service)" do mesmo projeto
   googleClientId: "591250475185-efuiq7vtuuns5jh4bc44fs663jssej4b.apps.googleusercontent.com",
   timeZone: "America/Sao_Paulo",
+  // Administrador: libera quem pode entrar (Ajustes → Quem pode entrar). Tem que ser o mesmo e-mail das regras do Firestore.
+  admin: "1imovjund@gmail.com",
   // chave pública das notificações (a privada fica só nos segredos do GitHub)
   vapidPublicKey: "BADL-EymXkRM3FzijrMV75jfqMnNM8Y4f5wVmK-CIJW1OEacFLoeRL0tKt_UpxLbXJDkUg88kkq3uQKwNDeyXsQ"
 };

@@ -10,6 +10,43 @@ const SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-5);
+/* ---------- higiene do que vem de OUTRAS pessoas (compartilhados, atendimentos, diretório) ----------
+   Nada que outro usuário grava entra na tela sem passar por aqui: só fica o formato esperado. */
+const txt = (v, max) => typeof v === 'string' ? v.slice(0, max) : (typeof v === 'number' && isFinite(v) ? String(v).slice(0, max) : '');
+const RE_ID = /^[A-Za-z0-9_-]{1,40}$/;                                        // ids de documento e de usuário
+const RE_DATA_HORA = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?Z?)?)?$/;  // AAAA-MM-DD[THH:MM[:SS[.mmm][Z]]]
+const dataOk = v => typeof v === 'string' && RE_DATA_HORA.test(v) ? v : '';
+function limparCliente(x){
+  x = x && typeof x === 'object' && !Array.isArray(x) ? x : {};
+  const etapa = x.etapa === 'Visita' ? 'Visita agendada' : x.etapa;
+  const valor = typeof x.valor === 'number' ? x.valor : (typeof x.valor === 'string' && /^\d+(\.\d+)?$/.test(x.valor) ? +x.valor : 0);
+  const o = {
+    nome: txt(x.nome, 120), fone: txt(x.fone, 40).replace(/[^\d+()\- ]/g, ''),
+    produtoId: txt(x.produtoId, 60), produtoNome: txt(x.produtoNome, 120), corretorNome: txt(x.corretorNome, 80),
+    etapa: ETAPAS.includes(etapa) ? etapa : 'Novo lead', temp: TEMPS.includes(x.temp) ? x.temp : '',
+    lembrete: dataOk(x.lembrete), notas: txt(x.notas, 5000),
+    valor: isFinite(valor) && valor >= 0 ? valor : 0,
+    contatos: Array.isArray(x.contatos) ? x.contatos.map(dataOk).filter(Boolean).slice(-200) : [],
+    historico: Array.isArray(x.historico) ? x.historico.filter(h => h && typeof h === 'object').map(h => ({de: txt(h.de, 40), para: txt(h.para, 40), em: dataOk(h.em)})).filter(h => h.em).slice(-200) : [],
+    vendaEm: /^\d{4}-\d{2}-\d{2}$/.test(x.vendaEm || '') ? x.vendaEm : undefined,
+    criado: dataOk(x.criado)
+  };
+  Object.keys(o).forEach(k => { if (x[k] === undefined || o[k] === undefined) delete o[k]; }); // não inventa campo que não veio
+  return o;
+}
+function limparAtend(a){
+  if (!a || !RE_ID.test(a.id || '') || !dataOk(a.inicio) || a.inicio.length < 16) return null;
+  const o = Object.assign({}, a);
+  ['titulo','local','produto','criadoPor','clienteId','eventId','iCalUID','status','tipo'].forEach(k => { if (o[k] != null) o[k] = txt(o[k], 200); });
+  if (o.notas != null) o.notas = txt(o.notas, 5000);
+  if (o.cliente != null) o.cliente = txt(o.cliente, 200);
+  o.duracao = Math.min(Math.max(+o.duracao || 60, 5), 24 * 60);
+  o.participantes = Array.isArray(o.participantes) ? o.participantes.filter(u => typeof u === 'string' && RE_ID.test(u)) : [];
+  if (o.htmlLink && !/^https:\/\/(www\.google\.com|calendar\.google\.com)\//.test(String(o.htmlLink))) o.htmlLink = null;
+  return o;
+}
+const limparPessoa = p => { p = p && typeof p === 'object' ? p : {}; const foto = typeof p.foto === 'string' && /^https:\/\/[a-z0-9.-]+\.googleusercontent\.com\//.test(p.foto) ? p.foto : '';
+  return {nome: txt(p.nome, 80), email: txt(p.email, 120).toLowerCase(), foto, visto: +p.visto || 0}; };
 const pad = n => String(n).padStart(2, '0');
 const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const today = () => ymd(new Date());
@@ -124,17 +161,20 @@ function reconstruirShares(){
   const novos = [], mapa = {}; sharesMeus = {}; let mudouLocal = false;
   const todos = docsC.map(x => Object.assign({}, x, {sid: x.id})).concat(docsA.map(x => Object.assign({}, x, {sid: 'a:' + x.id, dono: x.criadoPor, membros: x.participantes || [], soLeitura: true})));
   todos.forEach(x => {
-    if (!x.cliente) return;
+    if (!x.cliente || typeof x.cliente !== 'object' || !RE_ID.test(x.id || '') || typeof x.dono !== 'string') return;
+    const cli = limparCliente(x.cliente), atualizado = +x.atualizado || 0;
+    x = Object.assign({}, x, {cliente: cli, atualizado, membros: Array.isArray(x.membros) ? x.membros.filter(u => typeof u === 'string' && RE_ID.test(u)) : []});
+    const calMeu = x.cal && typeof x.cal === 'object' && typeof x.cal[me.uid] === 'string' ? x.cal[me.uid] : null;
     if (x.dono === me.uid) {
       sharesMeus[x.sid] = x;
       const c = S.clientes.find(k => k.shareId === x.sid);
-      if (c && x.atualizadoPor !== me.uid && (x.atualizado || 0) > (c.shareSync || 0)) {
-        CAMPOS_CLI.forEach(k => { if (k !== 'criado' && x.cliente[k] !== undefined) c[k] = x.cliente[k]; }); c.shareSync = x.atualizado; mudouLocal = true;
+      if (c && x.atualizadoPor !== me.uid && atualizado > (c.shareSync || 0)) {
+        CAMPOS_CLI.forEach(k => { if (k !== 'criado' && cli[k] !== undefined) c[k] = cli[k]; }); c.shareSync = atualizado; mudouLocal = true;
       }
     } else {
       mapa[x.sid] = x;
-      const p = S.produtos.find(z => z.id === x.cliente.produtoId) || S.produtos.find(z => normNome(z.nome) === normNome(x.cliente.produtoNome || ''));
-      novos.push(Object.assign({}, x.cliente, {id: 'sh' + x.sid.replace(':', '_'), _recebido: true, _share: x.sid, _soLeitura: !!x.soLeitura, _dono: x.dono, corretorId: 'sh-' + x.sid, corretorNome: x.cliente.corretorNome, produtoId: p ? p.id : '', calEventId: (x.cal || {})[me.uid] || null}));
+      const p = S.produtos.find(z => z.id === cli.produtoId) || S.produtos.find(z => normNome(z.nome) === normNome(cli.produtoNome || ''));
+      novos.push(Object.assign({}, cli, {id: 'sh' + x.sid.replace(':', '_'), _recebido: true, _share: x.sid, _soLeitura: !!x.soLeitura, _dono: x.dono, corretorId: 'sh-' + x.sid, corretorNome: cli.corretorNome || '', produtoId: p ? p.id : '', calEventId: calMeu}));
     }
   });
   recebidos = novos; recebidosMap = mapa;
@@ -176,13 +216,18 @@ function setSync(s){ syncState = s; const el = $('#syncInd'); if (el) { el.class
 const syncLabel = () => ({ok:'Salvo na sua conta', saving:'Salvando…', err:'Sem conexão, tentando de novo'})[syncState];
 
 const pending = new Set(); let saveTimer;
+// Seções cuja leitura falhou: NUNCA gravar por cima, senão a lista vazia apagaria o que está na nuvem.
+const naoCarregado = new Set(); let avisouNaoCarregado = 0;
 function save(...ks){
+  const travadas = ks.filter(k => naoCarregado.has(k));
+  if (travadas.length && Date.now() - avisouNaoCarregado > 4000) { avisouNaoCarregado = Date.now(); toast('Seus dados ainda não carregaram. Nada foi salvo; aguarde ou recarregue o app.', true); }
+  ks = ks.filter(k => !naoCarregado.has(k));
   ks.forEach(k => pending.add(k));
   clearTimeout(saveTimer); saveTimer = setTimeout(flush, 350);
 }
 async function flush(){
   if (!me || !fdb || !pending.size) return;
-  const ks = [...pending]; pending.clear(); setSync('saving');
+  const ks = [...pending].filter(k => !naoCarregado.has(k)); pending.clear(); if (!ks.length) return; setSync('saving');
   try {
     const batch = fdb.batch();
     ks.forEach(k => batch.set(fdb.doc(`users/${me.uid}/dados/${k}`), {v: S[k], at: Date.now()}));
@@ -190,14 +235,35 @@ async function flush(){
   } catch(e) { ks.forEach(k => pending.add(k)); setSync('err'); setTimeout(flush, 5000); }
 }
 
+// Lê uma seção; tenta 3 vezes. Devolve null se não conseguiu (diferente de "não existe", que é conta nova).
+async function lerSecao(k){
+  for (let t = 0; t < 3; t++) {
+    try { return await fdb.doc(`users/${me.uid}/dados/${k}`).get(); }
+    catch(e) { await new Promise(r => setTimeout(r, 800 * (t + 1))); }
+  }
+  return null;
+}
+// Fica tentando as seções que falharam; quando chegam, liberam o salvamento e a tela atualiza.
+let tentarFaltandoTimer = null;
+function tentarFaltando(){
+  clearTimeout(tentarFaltandoTimer);
+  if (!naoCarregado.size || !me) return;
+  tentarFaltandoTimer = setTimeout(async () => {
+    const d = DEF();
+    for (const k of [...naoCarregado]) { const s = await lerSecao(k); if (s) { S[k] = (s.exists && s.data().v !== undefined) ? s.data().v : d[k]; naoCarregado.delete(k); } }
+    if (!naoCarregado.size) { toast('Dados carregados'); render(false); } else tentarFaltando();
+  }, 10000);
+}
 async function loadUserData(){
-  const snaps = await Promise.all(KEYS.map(k => fdb.doc(`users/${me.uid}/dados/${k}`).get().catch(()=>null)));
+  naoCarregado.clear();
+  const snaps = await Promise.all(KEYS.map(lerSecao));
   const d = DEF();
-  snaps.forEach((s, i) => { const k = KEYS[i]; S[k] = (s && s.exists && s.data().v !== undefined) ? s.data().v : d[k]; });
+  snaps.forEach((s, i) => { const k = KEYS[i]; if (!s) naoCarregado.add(k); S[k] = (s && s.exists && s.data().v !== undefined) ? s.data().v : d[k]; });
+  if (naoCarregado.size) { toast('Não deu para carregar todos os seus dados. Nada será apagado; tentando de novo…', true); tentarFaltando(); }
   if (!S.corretores.length) S.corretores = d.corretores;
   if (!Array.isArray(S.tarefas)) S.tarefas = [];
   let mig = false; S.clientes.forEach(c => { if (c.etapa === 'Visita') { c.etapa = 'Visita agendada'; mig = true; } }); if (mig) save('clientes');
-  if (!S.prefs || !S.prefs.catalogo) {           // completa a lista com todos os empreendimentos, uma vez
+  if ((!S.prefs || !S.prefs.catalogo) && !naoCarregado.has('prefs') && !naoCarregado.has('produtos')) { // completa a lista com todos os empreendimentos, uma vez
     const have = new Set(S.produtos.map(p => normNome(p.nome)));
     d.produtos.forEach(p => { const ex = S.produtos.find(x => normNome(x.nome) === normNome(p.nome)); if (ex) { if (!ex.inc) ex.inc = p.inc; if (p.coord) ex.coord = true; } else if (!have.has(normNome(p.nome))) S.produtos.push(p); });
     S.prefs = Object.assign({}, S.prefs, {catalogo: 1}); save('produtos', 'prefs');
@@ -210,17 +276,17 @@ function watchAtendimentos(){
   if (unsubAt) unsubAt();
   unsubAt = fdb.collection('atendimentos').where('participantes', 'array-contains', me.uid)
     .onSnapshot(qs => {
-      const tudo = qs.docs.map(d => ({id: d.id, ...d.data()})); atend = tudo.filter(x => x.tipo !== 'cliente'); docsA = tudo.filter(x => x.tipo === 'cliente'); reconstruirShares(); agendarFila();
+      const tudo = qs.docs.map(d => ({id: d.id, ...d.data()})); atend = tudo.filter(x => x.tipo !== 'cliente').map(limparAtend).filter(Boolean); docsA = tudo.filter(x => x.tipo === 'cliente'); reconstruirShares(); agendarFila();
       const ids = new Set(); atend.forEach(a => (a.participantes||[]).forEach(u => ids.add(u)));
       loadPeople([...ids]).then(() => { if (!$('#sheetWrap').classList.contains('open') || ui.tab !== 'agenda') render(false); else render(false); });
     }, () => {});
 }
 async function loadPeople(ids){
   const miss = ids.filter(i => !people[i]);
-  await Promise.all(miss.map(i => fdb.doc('users/' + i).get().then(s => { if (s.exists) people[i] = s.data(); }).catch(()=>{})));
+  await Promise.all(miss.map(i => fdb.doc('users/' + i).get().then(s => { if (s.exists) people[i] = limparPessoa(s.data()); }).catch(()=>{})));
 }
 async function loadDirectory(){
-  try { const qs = await fdb.collection('users').get(); qs.docs.forEach(d => people[d.id] = d.data()); } catch(e) {}
+  try { const qs = await fdb.collection('users').get(); qs.docs.forEach(d => { if (RE_ID.test(d.id)) people[d.id] = limparPessoa(d.data()); }); } catch(e) {}
 }
 
 /* ================= Google Agenda ================= */
@@ -843,7 +909,7 @@ function sheetFechamentos(ym){
   const ano = ym.slice(0, 4), totAno = soma(todas.filter(c => dataVenda(c).slice(0, 4) === ano)), nAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).length;
   const agrupar = keyFn => { const g = {}; doMes.forEach(c => { const k = keyFn(c); g[k] = g[k] || {n: 0, v: 0}; g[k].n++; g[k].v += +c.valor || 0; }); return Object.entries(g).sort((a, b) => b[1].v - a[1].v || b[1].n - a[1].n); };
   const porCor = agrupar(c => c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome), porProd = agrupar(c => P(c.produtoId).nome);
-  const barras = (lista) => { const mx = Math.max(1, ...lista.map(([, x]) => x.v || x.n)); return `<div class="funnel">${lista.map(([k, x], j) => `<div class="fstage" style="--j:${j};grid-template-columns:110px 1fr auto"><span class="nm">${esc(k)}</span><span class="tr"><i style="transform:scaleX(0)" data-bar="${(x.v || x.n) / mx}" data-k="fx${ym}${j}${k}"></i></span><span class="ct num small" style="text-align:right">${x.n} · ${brlCurto(x.v)}</span></div>`).join('')}</div>`; };
+  const barras = (lista) => { const mx = Math.max(1, ...lista.map(([, x]) => x.v || x.n)); return `<div class="funnel">${lista.map(([k, x], j) => `<div class="fstage" style="--j:${j};grid-template-columns:110px 1fr auto"><span class="nm">${esc(k)}</span><span class="tr"><i style="transform:scaleX(0)" data-bar="${(x.v || x.n) / mx}" data-k="fx${ym}${j}${esc(k)}"></i></span><span class="ct num small" style="text-align:right">${x.n} · ${brlCurto(x.v)}</span></div>`).join('')}</div>`; };
   const dif = ant ? (total - ant) / ant : null;
   const W = 340, H = 150, base = 116, bw = 20, gap = (W - 12 * bw) / 13;
   openSheet('Fechamentos', `<div class="form fech">
@@ -907,11 +973,11 @@ function viewClientes(){
 function clienteCard(c){
   const p = P(c.produtoId), w = whenLabel(c.lembrete), idx = ETAPAS.indexOf(c.etapa);
   const pillCls = c.etapa === 'Venda' ? 'ok' : c.etapa === 'Perdido' ? '' : 'blue';
-  return `<button class="card tap ccard rv" data-act="abrirCliente" data-id="${c.id}" data-flip="c${c.id}">
+  return `<button class="card tap ccard rv" data-act="abrirCliente" data-id="${esc(c.id)}" data-flip="c${esc(c.id)}">
     <div class="top"><div class="grow" style="min-width:0;text-align:left"><div class="nm">${esc(c.nome)}</div>
       <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}</div></div>
       <span class="when ${w.cls}">${esc(w.txt)}</span></div>
-    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${c.temp}">●</span>${c.temp}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
+    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${esc(c.temp)}">●</span>${esc(c.temp)}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
     ${idx >= 0 && idx <= VI ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / (VI + 1)}" data-k="cb${c.id}"></i></div>` : ''}
   </button>`;
 }
@@ -939,7 +1005,7 @@ function viewAgenda(){
 
   const row = it => {
     if (it.tipo === 'a') { const a = it.a, fim = endOf(a.inicio, a.duracao || 60);
-      return `<button class="evt rowbtn" style="display:grid" data-act="abrirAtend" data-id="${a.id}" data-flip="a${a.id}"><div class="tm num">${it.hora}<small>${fim.slice(11,16)}</small></div>
+      return `<button class="evt rowbtn" style="display:grid" data-act="abrirAtend" data-id="${esc(a.id)}" data-flip="a${esc(a.id)}"><div class="tm num">${esc(it.hora)}<small>${esc(fim.slice(11,16))}</small></div>
         <div class="bd"><div class="t" style="font-weight:600">${esc(a.titulo)}${a.cliente ? ' · ' + esc(a.cliente) : ''}${a.status === 'realizado' ? ' <span class="pill ok">efetuada</span>' : ''}</div>
         <div class="s small muted">${[a.produto, a.local].filter(Boolean).map(esc).join(' · ')}</div>
         <div class="faces">${(a.participantes||[]).map(u => face(u)).join('')}</div></div></button>`; }
@@ -951,7 +1017,7 @@ function viewAgenda(){
       return `<button class="evt cp rowbtn" style="display:grid" data-act="abrirTarefa" data-id="${x.id}" data-flip="t${x.id}"><div class="tm num">${x.hora || 'Dia'}<small>${x.hora ? endOf(x.data + 'T' + x.hora, x.duracao || 60).slice(11,16) : 'todo'}</small></div>
         <div class="bd"><div class="t" style="font-weight:600">${esc(x.titulo)}</div><div class="s small muted">${['Compromisso', x.categoria, x.local].filter(Boolean).map(esc).join(' · ')}</div></div></button>`; }
     if (it.tipo === 'r') { const c = it.c;
-      return `<button class="evt r rowbtn" style="display:grid" data-act="abrirCliente" data-id="${c.id}"><div class="tm num">${it.hora}<small>retorno</small></div>
+      return `<button class="evt r rowbtn" style="display:grid" data-act="abrirCliente" data-id="${esc(c.id)}"><div class="tm num">${esc(it.hora)}<small>retorno</small></div>
         <div class="bd"><div class="t" style="font-weight:600">${esc(c.nome)}</div><div class="s small muted">${esc(P(c.produtoId).nome)} · ${esc(c.etapa)} · ${esc(B(c.corretorId).nome)}</div></div></button>`; }
     const e = it.e;
     return `<a class="evt g" href="${esc(e.htmlLink)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none"><div class="tm num">${it.hora || 'Dia'}<small>${e.end && e.end.dateTime ? localDT(new Date(e.end.dateTime)).slice(11,16) : 'todo'}</small></div>
@@ -1130,8 +1196,18 @@ function estCursos(){
 }
 
 /* ================= AJUSTES (sheet) ================= */
+/* ---------- quem pode entrar (só o administrador vê) ---------- */
+const souAdmin = () => !!(me && me.email && CFG.admin && me.email.toLowerCase() === CFG.admin.toLowerCase());
+const refAcesso = () => fdb.doc('config/acesso');
+async function carregarAcesso(){
+  const box = $('#acessoLista'); if (!box) return;
+  try {
+    const s = await refAcesso().get(); const emails = (s.exists && Array.isArray(s.data().emails) ? s.data().emails : []).filter(e => typeof e === 'string');
+    box.innerHTML = emails.length ? emails.map(e => `<div class="row"><span class="grow small" style="overflow-wrap:anywhere">${esc(e)}</span><button type="button" class="mini" data-act="acessoDel" data-v="${esc(e)}">Remover</button></div>`).join('') : '<span class="small muted">Ninguém além de você por enquanto.</span>';
+  } catch(e) { box.innerHTML = `<span class="small muted">Não deu para carregar a lista: ${esc(e.message)}</span>`; }
+}
 function sheetAjustes(){
-  setTimeout(blocoPush, 0);
+  setTimeout(blocoPush, 0); if (souAdmin()) setTimeout(carregarAcesso, 0);
   const th = (()=>{ try { return localStorage.getItem('foco-theme') || 'auto'; } catch(e) { return 'auto'; } })();
   openSheet('Ajustes', `<div class="form">
     <div class="card" style="display:flex;gap:12px;align-items:center;box-shadow:none;background:var(--surface)"><span class="avatar" style="width:48px;height:48px">${me.photoURL ? `<img src="${esc(me.photoURL)}" alt="" referrerpolicy="no-referrer">` : initials(me.displayName)}</span>
@@ -1146,6 +1222,9 @@ function sheetAjustes(){
     <div class="card" style="box-shadow:none"><div class="sec-row"><div><b>Google Agenda</b><div class="small muted">${hasTok() ? 'Conectada nesta sessão' : 'Desconectada'}</div></div>${hasTok() ? '<span class="pill ok">Ativa</span>' : '<button class="mini" data-act="conectarAgenda">Conectar</button>'}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Produtos</h2><button class="mini" data-act="novoProduto">Adicionar</button></div><p class="small muted" style="margin:6px 0 0">${S.produtos.length} empreendimentos. Os da sua coordenação aparecem primeiro nas listas.</p><input class="inp" id="prodBusca" placeholder="Buscar empreendimento" style="margin-top:10px" autocomplete="off"><div class="list" id="prodLista" style="margin-top:8px">${[...S.produtos].sort((a, b) => (b.coord ? 1 : 0) - (a.coord ? 1 : 0) || a.nome.localeCompare(b.nome)).map(p => `<button class="row rowbtn" data-act="editProduto" data-id="${p.id}" data-busca="${esc(normNome(p.nome + (p.inc || '')))}"><i class="dot" style="background:${p.cor};width:12px;height:12px"></i><span class="grow"><span class="t" style="font-weight:500">${esc(p.nome)}</span><span class="s">${esc(p.inc || 'Sem incorporadora')}${p.coord ? ' · coordenação' : ''}</span></span><span class="small muted">${S.clientes.filter(c => c.produtoId === p.id).length || ''}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Corretores</h2><button class="mini" data-act="novoCorretor">Adicionar</button></div><div class="list" style="margin-top:8px">${S.corretores.map(c => `<button class="row rowbtn" data-act="editCorretor" data-id="${c.id}"><span class="avatar" style="width:28px;height:28px;font-size:11px">${esc(initials(c.nome))}</span><span class="grow t" style="font-weight:500">${esc(c.nome)}${c.id === 'eu' ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted">${S.clientes.filter(x => x.corretorId === c.id).length}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
+    ${souAdmin() ? `<div class="card" style="box-shadow:none;display:grid;gap:10px"><div><b>Quem pode entrar no Foco</b><div class="small muted">Só estes e-mails (e você) conseguem fazer login.</div></div>
+      <div class="list" id="acessoLista"><span class="small muted">Carregando…</span></div>
+      <div style="display:flex;gap:8px"><input class="inp" id="acessoEmail" type="email" inputmode="email" autocomplete="off" placeholder="email@gmail.com" style="flex:1;min-width:0"><button type="button" class="mini" data-act="acessoAdd">Liberar</button></div></div>` : ''}
     <button class="btn sec wide" data-act="metas">Metas de peso, macros e leitura</button>
     <div class="sec-row"><span class="sync ${syncState}" id="syncInd"><i></i><span>${syncLabel()}</span></span><button class="link small" data-act="backup">Copiar backup</button></div>
   </div>`);
@@ -1206,7 +1285,7 @@ function sheetCliente(c){
       <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(c._recebido ? (c.corretorNome || '') : S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
-    <div class="field" id="cVendaBox" ${c.etapa === 'Venda' ? '' : 'hidden'}><label for="cVenda">Data da venda</label><input class="inp" id="cVenda" type="date" value="${c.etapa === 'Venda' ? (c.vendaEm || dataVenda(c) || today()) : today()}" max="${today()}"></div>
+    <div class="field" id="cVendaBox" ${c.etapa === 'Venda' ? '' : 'hidden'}><label for="cVenda">Data da venda</label><input class="inp" id="cVenda" type="date" value="${esc(c.etapa === 'Venda' ? (c.vendaEm || dataVenda(c) || today()) : today())}" max="${today()}"></div>
     <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
     <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div>${(on => `<button type="button" class="sw${on ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${on}"></button>`)(c.id ? !!c.calEventId : lembreteAuto())}</div>
@@ -1625,6 +1704,7 @@ function switchTab(k){
   lastTabIdx = i; ui.tab = k; renderTabs(); scrollTo({top:0}); render(true, dir);
 }
 function toast(msg, err){
+  if (!err && Date.now() - avisouNaoCarregado < 3500) return; // o aviso de "nada foi salvo" não pode ser coberto por um "salvo!"
   const t = $('#toast'); $('#toastMsg').textContent = msg; t.classList.toggle('err', !!err);
   t.querySelector('.ic svg').innerHTML = err ? '<path d="M12 7v6M12 17h.01"/>' : '<path d="M20 6 9 17l-5-5"/>';
   t.classList.remove('show'); void t.offsetWidth; t.classList.add('show');
@@ -1833,6 +1913,17 @@ const ACT = {
     if (!RM.matches) el.firstElementChild.animate([{transform:'rotate(-90deg) scale(.6)', opacity:0}, {transform:'none', opacity:1}], {duration: 420, easing: 'cubic-bezier(.34,1.42,.64,1)'});
     toast({auto:'Tema automático (segue o celular)', light:'Tema claro', dark:'Tema escuro'}[v]);
   },
+  acessoAdd: async () => {
+    const inp = $('#acessoEmail'); const email = (inp && inp.value || '').trim().toLowerCase();
+    if (!/^[^\s@<>"']+@[^\s@<>"']+\.[a-z]{2,}$/.test(email)) return toast('Digite um e-mail válido.', true);
+    try { await refAcesso().set({emails: firebase.firestore.FieldValue.arrayUnion(email)}, {merge: true}); inp.value = ''; toast(email + ' liberado'); carregarAcesso(); }
+    catch(e) { toast('Não deu para liberar: ' + e.message, true); }
+  },
+  acessoDel: async el => {
+    const email = el.dataset.v; if (!confirm(`Tirar o acesso de ${email}?`)) return;
+    try { await refAcesso().set({emails: firebase.firestore.FieldValue.arrayRemove(email)}, {merge: true}); toast('Acesso removido'); carregarAcesso(); }
+    catch(e) { toast('Não deu para remover: ' + e.message, true); }
+  },
   backup: async () => { const txt = JSON.stringify(S); try { await navigator.clipboard.writeText(txt); toast('Backup copiado'); } catch(e) { toast('Não deu para copiar', true); } },
   sair: async () => { closeSheet(); if (unsubAt) unsubAt(); if (unsubSh) unsubSh(); try { sessionStorage.removeItem('foco-gtok'); } catch(e) {} tok = null; await auth.signOut(); }
 };
@@ -1926,13 +2017,15 @@ document.addEventListener('submit', e => {
 });
 
 /* ================= login ================= */
+let avisoLogin = ''; // motivo que sobrevive ao signOut (ex.: e-mail sem acesso)
 function showLogin(msg){
+  if (msg) avisoLogin = msg; msg = msg || avisoLogin;
   $('#shell').hidden = true; $('#login').hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => { const r = $('#loginRing'); if (r) r.style.strokeDashoffset = 106.8 * .32; }));
   $('#loginErr').textContent = msg || '';
 }
 async function doLogin(){
-  const b = $('#btnLogin'); b.disabled = true; $('#loginErr').textContent = '';
+  const b = $('#btnLogin'); b.disabled = true; $('#loginErr').textContent = ''; avisoLogin = '';
   const prov = new firebase.auth.GoogleAuthProvider(); prov.setCustomParameters({prompt: 'select_account'});
   try {
     await auth.signInWithPopup(prov);
@@ -1950,7 +2043,15 @@ async function onUser(u){
   me = u; $('#login').hidden = true;
   const v = $('#view'); $('#shell').hidden = false; renderTabs();
   v.innerHTML = '<div class="empty" style="padding-top:30vh"><span class="spin" style="width:28px;height:28px;border:3px solid var(--accent);border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite"></span></div>';
-  fdb.doc('users/' + u.uid).set({nome: u.displayName || '', email: (u.email || '').toLowerCase(), foto: u.photoURL || '', visto: Date.now()}, {merge: true}).catch(() => {});
+  // Só entra quem está liberado pelas regras do banco. A gravação do próprio perfil é o teste:
+  // "permission-denied" = e-mail fora da lista. Sem internet, segue em frente (o cache resolve depois).
+  const perfil = fdb.doc('users/' + u.uid).set({nome: u.displayName || '', email: (u.email || '').toLowerCase(), foto: u.photoURL || '', visto: Date.now()}, {merge: true});
+  const acesso = await Promise.race([perfil.then(() => 'ok', e => e && e.code === 'permission-denied' ? 'negado' : 'erro'), new Promise(r => setTimeout(() => r('lento'), 6000))]);
+  if (acesso === 'negado') {
+    const email = u.email || 'sua conta';
+    me = null; avisoLogin = `${email} ainda não tem acesso ao Foco. Peça ao administrador para liberar seu e-mail.`; $('#shell').hidden = true; try { await auth.signOut(); } catch(e) {}
+    return showLogin(`${email} ainda não tem acesso ao Foco. Peça ao administrador para liberar seu e-mail.`);
+  }
   people[u.uid] = {nome: u.displayName, email: u.email, foto: u.photoURL};
   try { await loadUserData(); } catch(e) { toast('Não deu para carregar seus dados. Verifique a conexão.', true); }
   watchAtendimentos();
