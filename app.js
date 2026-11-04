@@ -1263,8 +1263,22 @@ async function carregarAcesso(){
     box.innerHTML = emails.length ? emails.map(e => `<div class="row"><span class="grow small" style="overflow-wrap:anywhere">${esc(e)}</span><button type="button" class="mini" data-act="acessoDel" data-v="${esc(e)}">Remover</button></div>`).join('') : '<span class="small muted">Ninguém além de você por enquanto.</span>';
   } catch(e) { box.innerHTML = `<span class="small muted">Não deu para carregar a lista: ${esc(e.message)}</span>`; }
 }
+async function importarAlimentos(file){
+  const txt = await file.text(); let d;
+  try { d = JSON.parse(txt); } catch(e) { throw new Error('O arquivo não é um arquivo de alimentos do Foco.'); }
+  if (!d || d.tipo !== 'foco-alimentos' || !Array.isArray(d.itens)) throw new Error('O arquivo não é um arquivo de alimentos do Foco.');
+  const novos = d.itens.filter(x => x && x.nome && isFinite(+x.kcal)).map(x => ({nome: String(x.nome).slice(0, 140), k: Math.round(+x.kcal), p: +x.p || 0, c: +x.c || 0, g: +x.g || 0, pn: String(x.porcao || 'porção').slice(0, 40), pg: 100, sp: true, receita: true, fonte: String(d.fonte || '').slice(0, 120)}));
+  if (!novos.length) throw new Error('Nenhum alimento válido no arquivo.');
+  const chave = n => normNome(n);
+  const mapa = new Map((S.alimentacao.meus || []).map(m => [chave(m.nome), m]));
+  let add = 0, upd = 0; novos.forEach(n => { mapa.has(chave(n.nome)) ? upd++ : add++; mapa.set(chave(n.nome), n); });
+  S.alimentacao.meus = [...mapa.values()]; save('alimentacao');
+  return {add, upd, fonte: d.fonte};
+}
 function sheetAjustes(){
-  setTimeout(blocoPush, 0); if (souAdmin()) setTimeout(carregarAcesso, 0);
+  if (souAdmin()) setTimeout(carregarAcesso, 0);
+  setTimeout(() => { blocoPush(); const f = $('#impArq'); if (f) f.addEventListener('change', async () => { const arq = f.files[0]; if (!arq) return;
+    try { const r = await importarAlimentos(arq); toast(`${r.add} receitas importadas${r.upd ? `, ${r.upd} atualizadas` : ''}`); sheetAjustes(); } catch(e) { toast(e.message, true); } f.value = ''; }); }, 0);
   const th = (()=>{ try { return localStorage.getItem('foco-theme') || 'auto'; } catch(e) { return 'auto'; } })();
   openSheet('Ajustes', `<div class="form">
     <div class="card" style="display:flex;gap:12px;align-items:center;box-shadow:none;background:var(--surface)"><span class="avatar" style="width:48px;height:48px">${me.photoURL ? `<img src="${esc(me.photoURL)}" alt="" referrerpolicy="no-referrer">` : initials(me.displayName)}</span>
@@ -1283,6 +1297,10 @@ function sheetAjustes(){
       <div class="list" id="acessoLista"><span class="small muted">Carregando…</span></div>
       <div style="display:flex;gap:8px"><input class="inp" id="acessoEmail" type="email" inputmode="email" autocomplete="off" placeholder="email@gmail.com" style="flex:1;min-width:0"><button type="button" class="mini" data-act="acessoAdd">Liberar</button></div></div>` : ''}
     <button class="btn sec wide" data-act="metas">Metas de peso, macros e leitura</button>
+    <div class="card" style="box-shadow:none;display:grid;gap:10px"><div class="sec-row"><b>Receitas e alimentos</b><span class="small muted num">${(S.alimentacao.meus || []).filter(m => m.receita).length} receitas · ${(S.alimentacao.meus || []).filter(m => !m.receita).length} cadastrados</span></div>
+      <p class="small muted" style="margin:0">Importe um arquivo de receitas do Foco (.json). Elas ficam só na sua conta e aparecem na busca da refeição.</p>
+      <label class="btn sec wide" for="impArq">${ic('plus','s')}Importar arquivo de receitas</label><input type="file" id="impArq" accept=".json,application/json" hidden>
+      ${(S.alimentacao.meus || []).some(m => m.receita) ? `<button type="button" class="link small" data-act="askDel" style="justify-self:start;color:var(--err)">Remover receitas importadas</button>${confirmBox('Remover todas as receitas importadas? As refeições já registradas não mudam.', 'remReceitas', 'x')}` : ''}</div>
     <div class="sec-row"><span class="sync ${syncState}" id="syncInd"><i></i><span>${syncLabel()}</span></span><button class="link small" data-act="backup">Copiar backup</button></div>
   </div>`);
   const b = $('#prodBusca'); if (b) b.addEventListener('input', () => { const q = normNome(b.value); $('#prodLista').querySelectorAll('[data-busca]').forEach(r => r.hidden = q && !r.dataset.busca.includes(q)); });
@@ -1637,7 +1655,7 @@ function sheetRefeicao(){
   const mostrar = () => {
     const res = buscarAlimentos(busca.value), q = normBusca(busca.value);
     mealRes = res;
-    $('#mRes').innerHTML = res.map((a, i) => `<button type="button" class="row rowbtn" data-act="mealAdd" data-v="${i}"><span class="grow" style="min-width:0"><span class="t" style="font-weight:500">${esc(a.principal || a.nome)}${a.meu ? ' <span class="pill">meu</span>' : ''}</span>${a.det ? `<span class="s" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.det)}</span>` : ''}<span class="s num">${a.q100 ? `${fmt(a.k)} kcal por 100 g · P ${fmt(a.p, 1)} · C ${fmt(a.c, 1)} · G ${fmt(a.g, 1)}` : `1 ${esc(a.pn)} · ${fmt(a.k * a.pg / 100)} kcal`}</span></span>${ic('plus','s')}</button>`).join('')
+    $('#mRes').innerHTML = res.map((a, i) => `<button type="button" class="row rowbtn" data-act="mealAdd" data-v="${i}"><span class="grow" style="min-width:0"><span class="t" style="font-weight:500">${esc(a.principal || a.nome)}${a.receita ? ' <span class="pill ok">receita</span>' : a.meu ? ' <span class="pill">meu</span>' : ''}</span>${a.det ? `<span class="s" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.det)}</span>` : ''}<span class="s num">${a.q100 ? `${fmt(a.k)} kcal por 100 g · P ${fmt(a.p, 1)} · C ${fmt(a.c, 1)} · G ${fmt(a.g, 1)}` : `1 ${esc(a.pn)} · ${fmt(a.k * a.pg / 100)} kcal`}</span></span>${ic('plus','s')}</button>`).join('')
       || (q.length >= 2 ? (BASE ? '<p class="small muted" style="margin:6px 0 0">Nada encontrado. Tente outra palavra ou cadastre o alimento abaixo.</p>' : '<p class="small muted" style="margin:6px 0 0">Carregando a tabela de alimentos…</p>') : '');
   };
   busca.addEventListener('input', () => { clearTimeout(tmr); tmr = setTimeout(mostrar, 120); });
@@ -1649,7 +1667,7 @@ function drawMeal(){
   box.innerHTML = mealItens.length ? mealItens.map((it, i) => { const v = itemVals(it);
     return `<div class="row"><div class="grow"><div class="t" style="font-weight:500">${esc(it.nome)}</div><div class="s num">${fmt(v.k)} kcal · P ${fmt(v.p)} · C ${fmt(v.c)} · G ${fmt(v.g)}</div>
       <div class="btnrow" style="margin-top:6px;gap:6px;flex-wrap:nowrap"><input class="inp num" style="height:36px;width:76px;flex:none" type="number" inputmode="decimal" min="0" step="${it.un === 'g' ? 10 : 0.5}" value="${it.q}" data-mq="${i}" aria-label="Quantidade">
-      <select class="inp" style="height:36px;flex:1;min-width:0" data-mu="${i}" aria-label="Unidade"><option value="p"${it.un !== 'g' ? ' selected' : ''}>${esc(it.pn)} (${fmt(it.pg)} g)</option><option value="g"${it.un === 'g' ? ' selected' : ''}>gramas</option></select></div></div>
+      ${it.sp ? `<span class="small muted" style="align-self:center;flex:1">${esc(it.pn)}</span>` : ''}<select class="inp" style="height:36px;flex:1;min-width:0" data-mu="${i}" aria-label="Unidade" ${it.sp ? 'hidden' : ''}><option value="p"${it.un !== 'g' ? ' selected' : ''}>${esc(it.pn)} (${fmt(it.pg)} g)</option><option value="g"${it.un === 'g' ? ' selected' : ''}>gramas</option></select></div></div>
       <button type="button" class="round ghost" data-act="mealDel" data-v="${i}" aria-label="Remover">${ic('x','s')}</button></div>`; }).join('')
     : '<p class="small muted" style="margin:0">Nenhum alimento ainda. Busque acima.</p>';
   box.querySelectorAll('[data-mq]').forEach(el => el.addEventListener('input', () => { mealItens[+el.dataset.mq].q = Math.max(0, parseFloat(el.value.replace(',', '.')) || 0); drawTot(); el.closest('.row').querySelector('.s').textContent = (v => `${fmt(v.k)} kcal · P ${fmt(v.p)} · C ${fmt(v.c)} · G ${fmt(v.g)}`)(itemVals(mealItens[+el.dataset.mq])); }));
@@ -1915,7 +1933,7 @@ const ACT = {
   delRotina: el => { S.treinos.rotinas = S.treinos.rotinas.filter(r => r.id !== el.dataset.id); save('treinos'); closeSheet(); render(false); toast('Rotina excluída'); },
   novaRefeicao: () => sheetRefeicao(),
   repMeal: el => { const m = find(S.alimentacao.refeicoes, el.dataset.v); if (!m) return; $('#mNome').value = m.nome; mealItens = m.itens.map(i => Object.assign({}, i)); drawMeal(); },
-  mealAdd: el => { const a = mealRes[+el.dataset.v]; if (!a) return; mealItens.push({nome:a.principal || a.nome, k:a.k, p:a.p, c:a.c, g:a.g, pn:a.pn, pg:a.pg, q: a.q100 ? 100 : 1, un: a.q100 ? 'g' : 'p'}); $('#mBusca').value = ''; $('#mRes').innerHTML = ''; drawMeal(); const last = $('#mItens').lastElementChild; if (last && !RM.matches) last.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'none'}], {duration: 320}); },
+  mealAdd: el => { const a = mealRes[+el.dataset.v]; if (!a) return; mealItens.push({nome:a.principal || a.nome, k:a.k, p:a.p, c:a.c, g:a.g, pn:a.pn, pg:a.pg, sp: !!a.sp, q: a.q100 ? 100 : 1, un: a.q100 ? 'g' : 'p'}); $('#mBusca').value = ''; $('#mRes').innerHTML = ''; drawMeal(); const last = $('#mItens').lastElementChild; if (last && !RM.matches) last.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'none'}], {duration: 320}); },
   mealDel: el => { mealItens.splice(+el.dataset.v, 1); drawMeal(); },
   mealManual: () => { const b = $('#mManual'); b.hidden = !b.hidden; if (!b.hidden) $('#xN').focus(); },
   mealSalvarMeu: () => {
@@ -1930,6 +1948,7 @@ const ACT = {
   },
   delRefeicao: el => { if (!confirm('Apagar esta refeição?')) return; S.alimentacao.refeicoes = S.alimentacao.refeicoes.filter(r => r.id !== el.dataset.id); save('alimentacao'); render(false); },
   metas: () => sheetMetas(),
+  remReceitas: () => { S.alimentacao.meus = (S.alimentacao.meus || []).filter(m => !m.receita); save('alimentacao'); toast('Receitas removidas'); sheetAjustes(); },
   fechamentos: () => sheetFechamentos(),
   fechMes: el => { if (el.hasAttribute('disabled')) return; const sb = $('#sheetBody'), y = sb.scrollTop; sheetFechamentos(el.dataset.v || el.closest('[data-v]').dataset.v); sb.scrollTop = y; },
   pushOn: async el => { el.disabled = true; el.innerHTML = '<span class="spin" style="width:14px;height:14px"></span>'; try { await ativarPush(); toast('Notificações ativadas'); } catch(e) { toast(e.message, true); } blocoPush(); },
