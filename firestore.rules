@@ -27,7 +27,7 @@ service cloud.firestore {
         && c.keys().hasOnly(['nome','fone','produtoId','produtoNome','corretorNome','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','criado'])
         && texto(c, 'nome', 120) && texto(c, 'fone', 40) && texto(c, 'produtoId', 60) && texto(c, 'produtoNome', 120)
         && texto(c, 'corretorNome', 80) && texto(c, 'notas', 5000) && texto(c, 'lembrete', 30) && texto(c, 'criado', 40)
-        && (!('etapa' in c) || c.etapa in ['Novo lead','Contato feito','Visita','Visita agendada','Visita efetuada','Simulação','Análise de crédito','Proposta','Documentação','Venda','Perdido'])
+        && (!('etapa' in c) || c.etapa in ['Novo lead','Contato feito','Visita','Visita agendada','Visita efetuada','Simulação','Análise de crédito','Crédito aprovado','Proposta','Documentação','Venda','Perdido'])
         && (!('temp' in c) || c.temp == null || c.temp in ['Quente','Morno','Frio',''])
         && (!('valor' in c) || c.valor == null || c.valor is number || (c.valor is string && c.valor.size() <= 20))
         && (!('vendaEm' in c) || c.vendaEm == null || (c.vendaEm is string && c.vendaEm.matches('^([0-9]{4}-[0-9]{2}-[0-9]{2})?$')))

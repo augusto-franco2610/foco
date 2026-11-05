@@ -97,7 +97,7 @@ const ic = (n, cls='') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden
 
 /* ================= estado ================= */
 const KEYS = ['clientes','produtos','corretores','peso','treinos','alimentacao','livros','cursos','prefs','tarefas'];
-const ETAPAS = ['Novo lead','Contato feito','Visita agendada','Visita efetuada','Simulação','Análise de crédito','Proposta','Documentação','Venda','Perdido'];
+const ETAPAS = ['Novo lead','Contato feito','Visita agendada','Visita efetuada','Simulação','Análise de crédito','Crédito aprovado','Proposta','Documentação','Venda','Perdido'];
 const VI = ETAPAS.indexOf('Venda');
 const ATIVAS = ETAPAS.slice(0, VI);
 const TEMPS = ['Quente','Morno','Frio'];
