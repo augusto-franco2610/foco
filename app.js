@@ -1387,7 +1387,7 @@ function sheetCliente(c){
   if (c._soLeitura) { const f = $('#sheetBody form'); f.querySelectorAll('input,select,textarea').forEach(x => x.disabled = true);
     f.querySelectorAll('[data-act=contato],[data-act=avancar],[data-act=visitaToggle],[data-act=visitaFeita],#cSave,#cCal').forEach(x => x.closest('.switch') ? x.closest('.switch').remove() : x.remove()); }
 }
-const TIPOS_VISITA = ['Visita ao decorado','Visita ao imóvel','Visita ao stand','Visita à obra'];
+const TIPOS_VISITA = ['Visita ao decorado','Visita ao escritório','Visita ao imóvel','Visita ao stand','Visita à obra'];
 const visitasDe = c => c && c.id ? atend.filter(a => a.clienteId === c.id && a.status !== 'cancelado').sort(byKey('inicio')) : [];
 function blocoVisita(c, novo){
   const vs = visitasDe(c), now = localDT(new Date());
@@ -1476,7 +1476,7 @@ async function sheetAtend(a){
   if (!novo && !mine) return sheetAtendView(a);
   a = a || {titulo:'Atendimento', cliente:'', produto:'', inicio: t + 'T10:00', duracao: 60, local:'', participantes:[me.uid], emailsExtras:'', notas:'', convite:true};
   openSheet(novo ? 'Novo atendimento' : 'Editar atendimento', `<form class="form" data-form="atend" data-id="${a.id || ''}">
-    <div class="field"><label for="aTit">Tipo</label><select class="inp" id="aTit">${['Atendimento','Visita ao decorado','Visita ao imóvel','Assinatura','Reunião','Plantão'].map(x => opt(x, x, a.titulo)).join('')}</select></div>
+    <div class="field"><label for="aTit">Tipo</label><select class="inp" id="aTit">${['Atendimento','Visita ao escritório','Visita ao decorado','Visita ao imóvel','Visita ao stand','Visita à obra','Assinatura','Reunião','Plantão'].map(x => opt(x, x, a.titulo)).join('')}</select></div>
     <div class="field"><label for="aCli">Cliente</label><input class="inp" id="aCli" list="cliList" value="${esc(a.cliente)}" placeholder="Nome do cliente" autocomplete="off"><datalist id="cliList">${ativos().map(c => `<option value="${esc(c.nome)}"></option>`).join('')}</datalist></div>
     <div class="field"><label for="aProd">Produto</label><select class="inp" id="aProd"><option value="">—</option>${prodOptions(a.produto, true)}</select></div>
     <div class="f3"><div class="field"><label for="aDia">Dia</label><input class="inp" id="aDia" type="date" value="${a.inicio.slice(0,10)}" required></div>
