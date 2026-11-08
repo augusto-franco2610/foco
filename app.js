@@ -28,7 +28,7 @@ function limparCliente(x){
     valor: isFinite(valor) && valor >= 0 ? valor : 0,
     contatos: Array.isArray(x.contatos) ? x.contatos.map(dataOk).filter(Boolean).slice(-200) : [],
     historico: Array.isArray(x.historico) ? x.historico.filter(h => h && typeof h === 'object').map(h => ({de: txt(h.de, 40), para: txt(h.para, 40), em: dataOk(h.em)})).filter(h => h.em).slice(-200) : [],
-    vendaEm: /^\d{4}-\d{2}-\d{2}$/.test(x.vendaEm || '') ? x.vendaEm : undefined,
+    vendaEm: /^\d{4}-\d{2}-\d{2}$/.test(x.vendaEm || '') ? x.vendaEm : undefined, unidade: x.unidade === undefined ? undefined : txt(x.unidade, 80),
     criado: dataOk(x.criado)
   };
   Object.keys(o).forEach(k => { if (x[k] === undefined || o[k] === undefined) delete o[k]; }); // não inventa campo que não veio
@@ -143,7 +143,7 @@ const B = id => S.corretores.find(c => c.id === id) || (String(id).startsWith('s
 let recebidos = [], recebidosMap = {}, sharesMeus = {};
 const CLI = () => S.clientes.concat(recebidos);
 const findCli = id => CLI().find(c => c.id === id);
-const CAMPOS_CLI = ['nome','fone','produtoId','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','criado'];
+const CAMPOS_CLI = ['nome','fone','produtoId','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','unidade','criado'];
 function snapCliente(c){ const o = {}; CAMPOS_CLI.forEach(k => { if (c[k] !== undefined) o[k] = c[k]; }); o.produtoNome = P(c.produtoId).nome; o.corretorNome = c._recebido ? (c.corretorNome || '') : B(c.corretorId).nome; return o; }
 async function pushShare(c){
   const sid = c._recebido ? c._share : c.shareId; if (!sid || !fdb || c._soLeitura) return;
@@ -1187,7 +1187,7 @@ function sheetFechamentos(ym){
           ${nPorMes[i] ? `<text x="${x + bw / 2}" y="${base - h - 5}" text-anchor="middle" style="font-size:10px">${nPorMes[i]}</text>` : ''}<text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" style="${sel ? 'fill:var(--fg);font-weight:700' : ''}">${MES[+m.slice(5) - 1].slice(0, 1).toUpperCase()}</text>${m.slice(5) === '01' || i === 0 ? `<text x="${x + bw / 2}" y="${H - 1}" text-anchor="middle" style="font-size:9px">${m.slice(2, 4)}</text>` : ''}</g>`; }).join('')}
     </svg><div class="small muted">Número acima da barra: vendas no mês. Toque numa barra para ver o mês.</div></div>
     ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
-    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map(c => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><b class="num">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b></button>`).join('')}</div></div>`
+    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map(c => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><b class="num">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b></button>`).join('')}</div></div>`
       : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
     <div class="card kpi"><span class="lbl">Total de ${ano}</span><span class="val num">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
   </div>`);
@@ -1240,7 +1240,7 @@ function clienteCard(c){
     <div class="top"><div class="grow" style="min-width:0;text-align:left"><div class="nm">${esc(c.nome)}</div>
       <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}</div></div>
       <span class="when ${w.cls}">${esc(w.txt)}</span></div>
-    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}</span><span class="pill"><span class="temp-${esc(c.temp)}">●</span>${esc(c.temp)}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
+    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}${c.etapa === 'Venda' && c.unidade ? ' · ' + esc(c.unidade) : ''}</span><span class="pill"><span class="temp-${esc(c.temp)}">●</span>${esc(c.temp)}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
     ${idx >= 0 && idx <= VI ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / (VI + 1)}" data-k="cb${c.id}"></i></div>` : ''}
   </button>`;
 }
@@ -1577,7 +1577,8 @@ function sheetCliente(c){
       <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(c._recebido ? (c.corretorNome || '') : S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
-    <div class="field" id="cVendaBox" ${c.etapa === 'Venda' ? '' : 'hidden'}><label for="cVenda">Data da venda</label><input class="inp" id="cVenda" type="date" value="${esc(c.etapa === 'Venda' ? (c.vendaEm || dataVenda(c) || today()) : today())}" max="${today()}"></div>
+    <div class="field" id="cVendaBox" ${c.etapa === 'Venda' ? '' : 'hidden'}><label for="cVenda">Data da venda</label><input class="inp" id="cVenda" type="date" value="${esc(c.etapa === 'Venda' ? (c.vendaEm || dataVenda(c) || today()) : today())}" max="${today()}">
+      <label for="cUnid" style="margin-top:6px">Unidade vendida</label><input class="inp" id="cUnid" value="${esc(c.unidade || '')}" placeholder="Ex.: Torre 2, apto 154 · Casa 37 · Lote 12, quadra B" autocomplete="off"></div>
     <div class="field"><label for="cValor">Valor do negócio (R$)</label><input class="inp num" id="cValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="Ex.: 350.000" autocomplete="off"></div>
     <div class="field"><label for="cLem">Lembrete de retorno</label><input class="inp" id="cLem" type="datetime-local" value="${esc(c.lembrete || '')}"></div>
     <div class="switch"><div><b>Lembrete na Google Agenda</b><div class="small muted">Cria um evento de 15 min no horário do retorno</div></div>${(on => `<button type="button" class="sw${on ? ' on' : ''}" id="cCal" data-act="sw" role="switch" aria-checked="${on}"></button>`)(c.id ? !!c.calEventId : lembreteAuto())}</div>
@@ -1618,10 +1619,20 @@ function blocoVisita(c, novo){
     <button type="button" class="btn sec wide" data-act="visitaToggle" id="vBtn">${ic('plus','s')}${prox.length ? 'Agendar outra visita' : 'Agendar visita'}</button>
   </div>`;
 }
+function sheetVenda(c){
+  openSheet('Registrar venda', `<div class="form">
+    <div class="card" style="box-shadow:none"><b>${esc(c.nome)}</b><div class="small muted">${esc(P(c.produtoId).nome)}</div></div>
+    <div class="field"><label for="vdUnid">Unidade vendida</label><input class="inp" id="vdUnid" value="${esc(c.unidade || '')}" placeholder="Ex.: Torre 2, apto 154" autocomplete="off" autofocus></div>
+    <div class="f2"><div class="field"><label for="vdData">Data da venda</label><input class="inp" id="vdData" type="date" value="${today()}" max="${today()}"></div>
+      <div class="field"><label for="vdValor">Valor (R$)</label><input class="inp num" id="vdValor" inputmode="decimal" value="${c.valor ? fmt(c.valor) : ''}" placeholder="350.000"></div></div>
+    <button type="button" class="btn pri wide" data-act="vendaConfirmar" data-id="${c.id}">${ic('check','s')}Registrar venda</button>
+  </div>`);
+}
 async function saveCliente(form){
   const id = form.dataset.id, novo = !id;
   // validações primeiro: se algo falta, nada é alterado nem duplicado
   if (!val('cNome')) return toast('Digite o nome do cliente.', true);
+  if (val('cEtapa') === 'Venda' && !val('cUnid')) { const u = $('#cUnid'); if (u) { u.focus(); u.scrollIntoView({block: 'center', behavior: RM.matches ? 'auto' : 'smooth'}); } return toast('Qual foi a unidade vendida? Preencha para registrar a venda.', true); }
   const vf0 = $('#vForm');
   if (vf0 && !vf0.hidden && (!val('vDia') || !val('vHora'))) return toast('Escolha o dia e a hora da visita.', true);
   const gen = sheetGen;
@@ -1635,6 +1646,7 @@ async function saveCliente(form){
   Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
   if (etapaAnt) mudarEtapa(c, val('cEtapa')); else c.etapa = val('cEtapa');
   marcarVenda(c); if (c.etapa === 'Venda' && val('cVenda')) c.vendaEm = val('cVenda');
+  if (c.etapa === 'Venda') c.unidade = val('cUnid');
   if (novo) S.clientes.push(c);
   const wantCal = $('#cCal').classList.contains('on');
   const vf = $('#vForm'), querVisita = vf && !vf.hidden;
@@ -2057,9 +2069,17 @@ const ACT = {
   },
   avancar: el => {
     const c = findCli(el.dataset.id), i = ETAPAS.indexOf(c.etapa); if (i < 0 || i >= VI) return;
+    if (ETAPAS[i+1] === 'Venda') return sheetVenda(c);
     mudarEtapa(c, ETAPAS[i+1]); salvarCli(c); closeSheet(); render(false); toast(`${c.nome} em ${c.etapa}`);
   },
   novoCliente: () => sheetCliente(null),
+  vendaConfirmar: el => {
+    const c = findCli(el.dataset.id); if (!c) return;
+    const u = val('vdUnid'); if (!u) { $('#vdUnid').focus(); return toast('Informe a unidade vendida.', true); }
+    mudarEtapa(c, 'Venda'); marcarVenda(c); c.vendaEm = val('vdData') || today(); c.unidade = u;
+    const v = parseBRL(val('vdValor')); if (v) c.valor = v;
+    salvarCli(c); closeSheet(); render(false); toast(`Venda registrada: ${c.nome} · ${u}`);
+  },
   visitaToggle: async () => {
     const f = $('#vForm'), b = $('#vBtn'); f.hidden = !f.hidden;
     b.innerHTML = f.hidden ? ic('plus','s') + 'Agendar visita' : ic('x','s') + 'Não agendar agora';
