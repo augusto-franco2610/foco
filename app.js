@@ -649,8 +649,8 @@ function interpretarTreino(txt){
 let impBlocos = [];
 function sheetImportTreino(){
   openSheet('Importar treino', `<div class="form">
-    <p class="small muted" style="margin:0">Envie a ficha do seu treino: <b>PDF</b>, <b>foto</b> da folha ou um <b>texto</b>. O app separa os treinos (A, B, C… ou dias da semana) e os exercícios com séries, repetições e carga. Você confere antes de salvar.</p>
-    <label class="btn pri wide" for="itArq">${ic('plus','s')}Escolher arquivo</label><input type="file" id="itArq" accept=".pdf,.txt,.csv,image/*,application/pdf,text/plain" hidden>
+    <p class="small muted" style="margin:0">Envie a ficha do seu treino: <b>PDF</b>, <b>foto</b> da folha, <b>JSON</b> ou um <b>texto</b>. O app separa os treinos (A, B, C… ou dias da semana) e os exercícios com séries, repetições e carga. Você confere antes de salvar.</p>
+    <label class="btn pri wide" for="itArq">${ic('plus','s')}Escolher arquivo</label><input type="file" id="itArq" accept=".pdf,.txt,.csv,.json,image/*,application/pdf,text/plain,application/json" hidden>
     <details><summary class="small muted" style="cursor:pointer">Ou colar o texto do treino</summary><textarea class="inp" id="itTxt" rows="6" style="margin-top:8px" placeholder="Treino A - Peito e tríceps&#10;Supino reto 4x10 40kg&#10;Crucifixo 3x12&#10;&#10;Treino B - Costas&#10;Puxada frente 4x12 45kg"></textarea><button type="button" class="btn sec wide" style="margin-top:8px" data-act="itColar">Ler texto</button></details>
     <span class="small muted" id="itStatus"></span>
     <div id="itPrev" style="display:grid;gap:12px"></div>
@@ -659,8 +659,25 @@ function sheetImportTreino(){
   f.addEventListener('change', async () => { const arq = f.files[0]; if (!arq) return;
     try { const txt = await textoDoArquivo(arq, st); mostrarImport(txt); } catch(e) { st(e.message || 'Não deu para ler o arquivo.'); } f.value = ''; });
 }
+// JSON: [{nome, dias, descanso, exercicios:[texto | {nome, series, repeticoes|reps, carga|kg}]}] ou {rotinas|treinos: [...]}
+function treinoDeJSON(txt){
+  let d; try { d = JSON.parse(txt); } catch(e) { return null; }
+  let lista = Array.isArray(d) ? d : (d && (d.rotinas || d.treinos || d.fichas || d.divisoes)) || (d && (d.exercicios || d.exercises) ? [d] : null);
+  if (!Array.isArray(lista)) return null;
+  const diaNum = x => { if (typeof x === 'number') return x % 7; const l = normBusca(x); const f = DIAS_RE.find(([n]) => l.startsWith(normBusca(n).slice(0, 3))); return f ? f[1] : null; };
+  return lista.map((r, i) => {
+    const exs = (r.exercicios || r.exercises || r.itens || []).map(e => {
+      if (typeof e === 'string') return e.trim();
+      const nome = String(e.nome || e.exercicio || e.name || '').trim(); if (!nome) return '';
+      const series = +(e.series || e.sets || 3) || 3, reps = String(e.repeticoes || e.reps || e.repetições || 12).match(/\d+/), kg = parseFloat(String(e.carga || e.kg || e.peso || e.weight || '').replace(',', '.'));
+      return `${nome} ${series}x${reps ? reps[0] : 12}${kg ? ' ' + kg + 'kg' : ''}`;
+    }).filter(Boolean);
+    const desc = parseInt(r.descanso || r.rest || r.descanso_segundos || 0, 10) || 0;
+    return {nome: String(r.nome || r.name || r.treino || 'Treino ' + 'ABCDEFG'[i]).slice(0, 60), dias: [...new Set((Array.isArray(r.dias) ? r.dias : r.dias ? [r.dias] : []).map(diaNum).filter(x => x != null))], ex: exs, descanso: desc};
+  }).filter(b => b.ex.length);
+}
 function mostrarImport(txt){
-  impBlocos = interpretarTreino(txt);
+  impBlocos = treinoDeJSON(txt) || interpretarTreino(txt);
   const st = $('#itStatus'), box = $('#itPrev'); if (!box) return;
   if (!impBlocos.length) { st.textContent = 'Não encontrei exercícios com séries e repetições (ex.: "Supino 4x10"). Cole o texto e ajuste o formato, ou monte a rotina à mão.'; box.innerHTML = ''; if (!$('#itTxt').value) $('#itTxt').value = String(txt).slice(0, 4000); $('#sheetBody details').open = true; return; }
   st.textContent = `Encontrei ${impBlocos.length} ${impBlocos.length === 1 ? 'treino' : 'treinos'} com ${impBlocos.reduce((a, b) => a + b.ex.length, 0)} exercícios. Confira e ajuste:`;
