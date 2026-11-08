@@ -17,7 +17,7 @@ printf '{"v":"%s"}\n' "$V" > versao.json
 # 3) Só os arquivos do app — nada solto na pasta (chaves, exportações) vai para o repositório público
 git add index.html versao.json app.js styles.css config.js sw.js manifest.json alimentos.json firestore.rules publicar.sh .gitignore \
         robo/enviar.mjs robo/package.json robo/package-lock.json .github/workflows/notificacoes.yml \
-        favicon-32.png apple-touch-icon.png icon-192.png icon-512.png
+        favicon-32.png apple-touch-icon.png icon-192.png icon-512.png vendor/pdf.min.js vendor/pdf.worker.min.js
 git commit -q -m "${1:-Atualização}"
 git push -q origin main
 echo "publicado $V"

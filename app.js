@@ -431,13 +431,15 @@ async function blocoPush(){
 // "Supino reto 4x10 40kg" → {nome, series, reps, kg}
 // "Supino 4x10 40kg" → {nome:'Supino', series:4, reps:10, kg:40}. Aceita "4x10-12", "3x30s", "4x10 - 40 kg".
 function parseEx(txt){
-  const t = String(txt || '').trim(); let series = 3, reps = 12, kg = 0, resto = t;
+  const t = String(txt || '').trim(); let series = 3, reps = 12, kg = 0, resto = t, faixa = '', descanso = 0;
+  const dsc = resto.match(/(?:descanso\s*)?(\d{2,3})\s*(?:s|seg|segs|segundos)\b/i);   // descanso do exercício: "120s"
+  if (dsc && +dsc[1] >= 10 && +dsc[1] <= 300) { descanso = +dsc[1]; resto = resto.replace(dsc[0], ' '); }
   const k = resto.match(/(\d+(?:[.,]\d+)?)\s*kg\b/i);                     // a carga sai primeiro, para não virar "faixa de repetições"
   if (k) { kg = parseFloat(k[1].replace(',', '.')); resto = resto.replace(k[0], ' '); }
-  const m = resto.match(/(\d+)\s*[xX×]\s*(\d+)(?:\s*(?:-|a)\s*\d+)?(?:\s*(?:s|seg|segs|min)\b)?/);
-  if (m) { series = Math.min(12, +m[1] || 3); reps = Math.min(100, +m[2] || 12); resto = resto.replace(m[0], ' '); }
+  const m = resto.match(/(\d+)\s*[xX×]\s*(\d+)(?:\s*(?:-|–|a)\s*(\d+))?(?:\s*(?:s|seg|segs|min)\b)?/);
+  if (m) { series = Math.min(12, +m[1] || 3); reps = Math.min(100, +m[2] || 12); if (m[3] && +m[3] > reps) { faixa = reps + '–' + m[3]; reps = Math.min(100, +m[3]); } resto = resto.replace(m[0], ' '); }
   const nome = resto.replace(/[·•|]+|(^|\s)[-–]+(?=\s|$)/g, ' ').replace(/\s{2,}/g, ' ').trim() || t;
-  return {nome, series, reps, kg};
+  return {nome, series, reps, kg, faixa, descanso};
 }
 const SKEY = 'foco-sessao';
 let sessao = null, sessTick = null, wakeLock = null, audioCtx = null;
@@ -459,7 +461,7 @@ function iniciarTreino(rotinaId){
   const ult = [...S.treinos.feitos].reverse().find(f => f.rotinaId === r.id && f.exs);
   sessao = {rotinaId: r.id, nome: r.nome, descanso: r.descanso || 60, inicio: agoraMs(), pausaTotal: 0, pausadoEm: null, descansoAte: null, descansoDe: null, foco: 0,
     exs: r.exercicios.map((txt, i) => { const p = parseEx(txt), prev = ult && ult.exs[i] && ult.exs[i].nome === p.nome ? ult.exs[i] : null;
-      return {nome: p.nome, series: [...Array(p.series)].map((_, j) => ({reps: prev && prev.series[j] ? prev.series[j].reps : p.reps, kg: prev && prev.series[j] && prev.series[j].kg ? prev.series[j].kg : p.kg, feita: false}))}; })};
+      return {nome: p.nome, faixa: p.faixa, descanso: p.descanso, series: [...Array(p.series)].map((_, j) => ({reps: prev && prev.series[j] ? prev.series[j].reps : p.reps, kg: prev && prev.series[j] && prev.series[j].kg ? prev.series[j].kg : p.kg, feita: false}))}; })};
   salvarSessao(); abrirSessao();
 }
 async function pedirTelaLigada(){ try { if ('wakeLock' in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); } } catch(e) {} }
@@ -485,7 +487,7 @@ function tickSessao(){
   const el = $('#tsTempo'); if (el) el.textContent = mmss(tempoAtivo(sessao));
   const kc = $('#tsKcal'); if (kc) kc.textContent = fmt(kcalTreino(tempoAtivo(sessao), pesoAtual(), 'moderado'));
   if (sessao.descansoAte && !sessao.pausadoEm) {
-    const rest = sessao.descansoAte - agoraMs(), tot = sessao.descanso * 1000;
+    const rest = sessao.descansoAte - agoraMs(), tot = (sessao.descansoDur || sessao.descanso) * 1000;
     const t = $('#tsRest'), ring = $('#tsRestRing');
     if (t) t.textContent = mmss(rest);
     if (ring) { const C = +ring.dataset.c; ring.style.strokeDashoffset = C * (1 - clamp(rest / Math.max(tot, 1))); }
@@ -514,7 +516,7 @@ function renderSessao(entrando){
       <div class="ts-rest-c"><span class="small muted">Descanso</span><b class="num" id="tsRest">${mmss(x.descansoAte - agoraMs())}</b>${pend ? `<span class="small muted">Próxima: ${esc(x.exs[pend[0]].nome)} · série ${pend[1] + 1}</span>` : ''}</div>
       <div class="btnrow ts-rest-b"><button class="mini" data-act="tsMais">+15 s</button><button class="mini" data-act="tsPular">Pular descanso</button></div></section>` : ''}
     <section class="ts-list">${x.exs.map((e, i) => { const ok = e.series.every(z => z.feita), atual = pend && pend[0] === i;
-      return `<div class="ts-ex${ok ? ' ok' : ''}${atual ? ' atual' : ''}" id="tsEx${i}"><div class="ts-ex-h"><span class="ts-n num">${ok ? ic('check','s') : i + 1}</span><b>${esc(e.nome)}</b><span class="small muted num">${e.series.filter(z => z.feita).length}/${e.series.length}</span></div>
+      return `<div class="ts-ex${ok ? ' ok' : ''}${atual ? ' atual' : ''}" id="tsEx${i}"><div class="ts-ex-h"><span class="ts-n num">${ok ? ic('check','s') : i + 1}</span><b>${esc(e.nome)}${e.faixa || e.descanso ? `<span class="small muted" style="display:block;font-weight:500">${[e.faixa && 'meta ' + e.faixa + ' rep', e.descanso && 'descanso ' + e.descanso + ' s'].filter(Boolean).join(' · ')}</span>` : ''}</b><span class="small muted num">${e.series.filter(z => z.feita).length}/${e.series.length}</span></div>
         <div class="ts-sets">${e.series.map((z, j) => `<div class="ts-set${z.feita ? ' feita' : ''}${atual && pend[1] === j ? ' prox' : ''}"><span class="small muted">Série ${j + 1}</span>
           <label><input class="inp num" type="number" inputmode="decimal" min="0" step="0.5" value="${z.kg || ''}" placeholder="kg" data-tsk="${i}.${j}.kg" aria-label="Carga em kg"><span>kg</span></label>
           <label><input class="inp num" type="number" inputmode="numeric" min="0" value="${z.reps}" data-tsk="${i}.${j}.reps" aria-label="Repetições"><span>rep</span></label>
@@ -553,7 +555,7 @@ const ACT_TREINO = {
   tsSerie: el => {
     const [i, j] = el.dataset.v.split('.').map(Number), z = sessao.exs[i].series[j];
     z.feita = !z.feita; z.em = z.feita ? agoraMs() : null;
-    if (z.feita) { el.classList.add('on', 'pop'); if (proximaPendente(sessao)) { sessao.descansoAte = agoraMs() + sessao.descanso * 1000; } else sessao.descansoAte = null; }
+    if (z.feita) { el.classList.add('on', 'pop'); if (proximaPendente(sessao)) { sessao.descansoDur = sessao.exs[i].descanso || sessao.descanso; sessao.descansoAte = agoraMs() + sessao.descansoDur * 1000; } else sessao.descansoAte = null; }
     else sessao.descansoAte = null;
     if (sessao.pausadoEm) { sessao.pausaTotal += agoraMs() - sessao.pausadoEm; sessao.pausadoEm = null; }
     salvarSessao(); setTimeout(() => { renderSessao(); const p = proximaPendente(sessao); if (p && sessao.exs[p[0]].series[p[1]] && p[1] === 0) { const e = $('#tsEx' + p[0]); e && e.scrollIntoView({block: 'center', behavior: RM.matches ? 'auto' : 'smooth'}); } }, RM.matches ? 0 : 260);
@@ -589,7 +591,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && se
 
 /* ================= importar treino de arquivo ================= */
 const carregarScript = (src) => new Promise((ok, err) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => err(new Error('Não deu para carregar o leitor de arquivos. Verifique a internet.')); document.head.appendChild(el); });
-const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', PDFJS_W = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const PDFJS = 'vendor/pdf.min.js', PDFJS_W = new URL('vendor/pdf.worker.min.js', location.href).href;   // pdf.js 3.11.174 hospedado junto do app
 const TESS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
 async function textoDoArquivo(file, status){
   const nome = (file.name || '').toLowerCase(), tipo = file.type || '';
@@ -598,8 +600,9 @@ async function textoDoArquivo(file, status){
     const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise; let out = '';
     for (let p = 1; p <= Math.min(pdf.numPages, 30); p++) {
       const pg = await pdf.getPage(p), tc = await pg.getTextContent(), linhas = new Map();
-      tc.items.forEach(it => { if (!it.str.trim()) return; const y = Math.round(it.transform[5] / 3); const l = linhas.get(y) || []; l.push([it.transform[4], it.str]); linhas.set(y, l); });
-      [...linhas.entries()].sort((a, b) => b[0] - a[0]).forEach(([, l]) => { out += l.sort((a, b) => a[0] - b[0]).map(x => x[1]).join('  ') + '\n'; });
+      tc.items.forEach(it => { if (!it.str.trim()) return; const y = Math.round(it.transform[5] / 3); const l = linhas.get(y) || []; l.push([it.transform[4], it.str, it.width || 0]); linhas.set(y, l); });
+      [...linhas.entries()].sort((a, b) => b[0] - a[0]).forEach(([, l]) => { l.sort((a, b) => a[0] - b[0]); let ln = '', fim = null;
+        l.forEach(([x, t, w]) => { const gap = fim == null ? 0 : x - fim; ln += fim == null ? t : (gap > 12 ? '    ' : gap > 1.5 ? ' ' : '') + t; fim = x + w; }); out += ln + '\n'; });
       out += '\n';
     }
     if (out.replace(/\s/g, '').length > 30) return out;
@@ -618,12 +621,14 @@ async function lerFoto(img, status){
 }
 const DIAS_RE = [['domingo',0],['segunda',1],['terça',2],['terca',2],['quarta',3],['quinta',4],['sexta',5],['sábado',6],['sabado',6]];
 function interpretarTreino(txt){
-  const linhas = String(txt || '').replace(/\r/g, '').split('\n').map(l => l.replace(/[\t ]+/g, ' ').trim()).filter(Boolean);
+  const brutas = String(txt || '').replace(/\r/g, '').replace(/\t/g, '   ').split('\n').map(l => l.trim()).filter(Boolean);
+  const linhas = brutas.map(l => l.replace(/ +/g, ' '));
   const blocos = []; let atual = null;
   const novo = (nome, dias) => { atual = {nome, dias, ex: [], descanso: 0}; blocos.push(atual); };
   const reSeries = /(\d{1,2})\s*(?:x|×|X|\*)\s*(\d{1,3}(?:\s*(?:a|-|–|\/)\s*\d{1,3}(?!\s*kg|[.,]\d))?|falha|max|máx)/i;
   const reSeries2 = /(\d{1,2})\s*s[ée]ries?\s*(?:de|x)?\s*(\d{1,3}(?:\s*(?:a|-|–|\/)\s*\d{1,3})?)\s*(?:repeti[çc][õo]es|reps?)\b/i;
-  for (const l0 of linhas) {
+  for (const [ix, l0] of linhas.entries()) {
+    const bruta = brutas[ix];
     const l = l0.replace(/^[\d]{1,2}\s*[.)\-–]\s*/, '').replace(/^[•\-–*]\s*/, '');
     const low = l.toLowerCase();
     const desc = low.match(/descanso[^0-9]{0,12}(\d{1,3})\s*(s|seg|"|min|')?/);
@@ -632,6 +637,16 @@ function interpretarTreino(txt){
       || /^[A-E]\s*[-–:)]\s*\D{3,}$/.test(l) && l.length < 50
       || DIAS_RE.some(([d]) => low.startsWith(d)) && !reSeries.test(l) && l.length < 60;
     if (ehCab) { const dias = DIAS_RE.filter(([d]) => low.includes(d)).map(([, i]) => i); novo(l.replace(/[:\-–]\s*$/, '').trim(), [...new Set(dias)]); continue; }
+    // linha de tabela: EXERCÍCIO   SÉRIES   REPETIÇÕES   [DESCANSO]   [CARGA]
+    const tab = bruta.replace(/^\d{1,2}\s*[.)\-–]\s*/, '').match(/^(.*?[a-zà-ú)\]])\s{2,}(\d{1,2})\s{2,}(\d{1,3}(?:\s*(?:-|–|a|\/)\s*\d{1,3})?)(?:\s{2,}(\d{1,3})\s*(s|seg|segundos|min|')?)?(?:\s{2,}(\d{1,3}(?:[.,]\d+)?)\s*kg)?\s*$/i);
+    if (tab && +tab[2] >= 1 && +tab[2] <= 10 && !/^exerc/i.test(tab[1])) {
+      if (!atual) novo('Treino importado', []);
+      let dsc = tab[4] ? +tab[4] : 0; if (/min|'/.test(tab[5] || '') || (dsc && dsc <= 5)) dsc *= 60;
+      const fx = tab[3].replace(/\s+/g, '').replace(/[–\/a]/g, '-');
+      atual.ex.push(`${tab[1].replace(/\s+/g, ' ').trim()} ${tab[2]}x${fx}${tab[6] ? ' ' + tab[6] + 'kg' : ''}${dsc ? ' ' + dsc + 's' : ''}`);
+      if (dsc) atual.descansos = (atual.descansos || []).concat(dsc);
+      continue;
+    }
     let m = l.match(reSeries) || l.match(reSeries2), series, reps, nome;
     if (m) { series = +m[1]; reps = m[2]; nome = l.replace(m[0], ''); }
     else { const t = l.match(/^(.{3,}?[a-zà-ú)])\s+(\d{1,2})\s+(\d{1,3})(?:\s+(\d{1,3}(?:[.,]\d)?))?(?:\s|$)/i);
@@ -642,8 +657,9 @@ function interpretarTreino(txt){
     if (!/[a-zà-ú]{3,}/i.test(nome)) continue;
     if (!atual) novo('Treino importado', []);
     const repsTxt = String(reps).replace(/\s+/g, '').replace(/[–\/]/g, '-');
-    atual.ex.push(`${nome[0].toUpperCase() + nome.slice(1)} ${series}x${/^\d/.test(repsTxt) ? repsTxt.split(/[-a]/)[0] : 12}${kg ? ' ' + kg[1] + 'kg' : ''}`);
+    atual.ex.push(`${nome[0].toUpperCase() + nome.slice(1)} ${series}x${/^\d/.test(repsTxt) ? repsTxt.replace(/a/g, '-') : 12}${kg ? ' ' + kg[1] + 'kg' : ''}`);
   }
+  blocos.forEach(b => { if (!b.descanso && b.descansos) { const c = {}; b.descansos.forEach(v => c[v] = (c[v] || 0) + 1); b.descanso = +Object.entries(c).sort((x, y) => y[1] - x[1])[0][0]; } });
   return blocos.filter(b => b.ex.length);
 }
 let impBlocos = [];
@@ -1281,7 +1297,7 @@ function corpoTreino(){
   const outras = S.treinos.rotinas.filter(r => !rot.includes(r));
   const rotCard = r => { const exs = (r.exercicios || []).map(parseEx), feita = feitosHoje.find(f => f.rotinaId === r.id);
     return `<div class="rot-hoje"><div class="sec-row"><b style="font-size:20px">${esc(r.nome)}</b>${feita ? `<span class="pill ok">${feita.duracao ? mmss(feita.duracao * 1000) + ' · ' + fmt(feita.kcal) + ' kcal' : 'feito'}</span>` : `<span class="small muted">${exs.length} exercícios · ${exs.reduce((a, e) => a + e.series, 0)} séries</span>`}</div>
-      <div class="list" style="margin:6px 0 12px">${exs.map(e => `<div class="row" style="padding:8px 0"><span class="grow">${esc(e.nome)}</span><span class="small muted num">${e.series}×${e.reps}${e.kg ? ' · ' + fmt(e.kg, e.kg % 1 ? 1 : 0) + ' kg' : ''}</span></div>`).join('') || '<p class="muted small">Sem exercícios cadastrados.</p>'}</div>
+      <div class="list" style="margin:6px 0 12px">${exs.map(e => `<div class="row" style="padding:8px 0"><span class="grow">${esc(e.nome)}</span><span class="small muted num">${e.series}×${e.faixa || e.reps}${e.kg ? ' · ' + fmt(e.kg, e.kg % 1 ? 1 : 0) + ' kg' : ''}${e.descanso ? ' · ' + e.descanso + ' s' : ''}</span></div>`).join('') || '<p class="muted small">Sem exercícios cadastrados.</p>'}</div>
       ${sessao && sessao.rotinaId === r.id ? `<button class="btn pri wide" data-act="retomarTreino">${ic('dumbbell','s')}Voltar ao treino · ${mmss(tempoAtivo(sessao))}</button>`
         : `<button class="btn ${feita ? 'sec' : 'pri'} wide btn-iniciar" data-act="iniciarTreino" data-id="${r.id}">${ic('dumbbell','s')}${feita ? 'Treinar de novo' : 'Iniciar treino'}</button>`}</div>`; };
   return `
