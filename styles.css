@@ -410,3 +410,9 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:16px 0}
 .fech-atalho > svg:first-child{color:var(--ok)}
 .fech .card{box-shadow:none}
 .fech .fech-bar:hover .vb{opacity:1!important}
+
+.ts-notas{background:var(--surface2);border-radius:12px;padding:10px 12px}
+.ts-notas summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--fg2)}
+.ts-notas p{margin:8px 0 0;font-size:14px;line-height:1.5;color:var(--fg)}
+.ts-tempo .ts-set{grid-template-columns:62px minmax(0,1fr) auto 34px}
+.ts-tempo .mini{display:inline-flex;align-items:center;gap:4px}

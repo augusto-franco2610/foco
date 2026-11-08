@@ -430,8 +430,14 @@ async function blocoPush(){
 /* ================= MODO TREINO ================= */
 // "Supino reto 4x10 40kg" → {nome, series, reps, kg}
 // "Supino 4x10 40kg" → {nome:'Supino', series:4, reps:10, kg:40}. Aceita "4x10-12", "3x30s", "4x10 - 40 kg".
+const METS = [[/corrida|correr|trote|jogging/i, 7.0], [/caminhada|caminhar/i, 3.5], [/bike|bicicleta|spinning|cicl/i, 7.0], [/nata[çc][ãa]o|nadar/i, 6.0], [/calistenia/i, 5.0], [/strong|hiit|funcional|crossfit|aula|circuito/i, 8.0], [/alongamento|mobilidade|yoga|pilates/i, 2.5], [/el[ií]ptico|escada|remo erg/i, 6.0]];
+const metPorNome = n => { const l = String(n || ''); const m = METS.find(([re]) => re.test(l)); let v = m ? m[1] : 5.0; if (/leve/i.test(l)) v = Math.max(2.5, v - 1); if (/intens|forte|tiro/i.test(l)) v += 1.5; return v; };
 function parseEx(txt){
-  const t = String(txt || '').trim(); let series = 3, reps = 12, kg = 0, resto = t, faixa = '', descanso = 0;
+  const tt = String(txt || '').trim();
+  const tm = tt.match(/(\d{1,3})\s*(?:min|minutos)\b/i);
+  if (tm && !/\d+\s*[xX×]\s*\d+/.test(tt)) { const nome = tt.replace(tm[0], ' ').replace(/[·•|:]+|(^|\s)[-–]+(?=\s|$)/g, ' ').replace(/\s{2,}/g, ' ').trim() || 'Atividade';
+    return {nome, tipo: 'tempo', min: Math.min(240, +tm[1] || 20), met: metPorNome(tt), series: 1, reps: +tm[1], kg: 0, faixa: '', descanso: 0}; }
+  const t = tt; let series = 3, reps = 12, kg = 0, resto = t, faixa = '', descanso = 0;
   const dsc = resto.match(/(?:descanso\s*)?(\d{2,3})\s*(?:s|seg|segs|segundos)\b/i);   // descanso do exercício: "120s"
   if (dsc && +dsc[1] >= 10 && +dsc[1] <= 300) { descanso = +dsc[1]; resto = resto.replace(dsc[0], ' '); }
   const k = resto.match(/(\d+(?:[.,]\d+)?)\s*kg\b/i);                     // a carga sai primeiro, para não virar "faixa de repetições"
@@ -450,17 +456,28 @@ const tempoAtivo = x => Math.max(0, (x.fimEm || agoraMs()) - x.inicio - x.pausaT
 const mmss = ms => { const t = Math.max(0, Math.round(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), sec = t % 60; return (h ? h + ':' + pad(m) : m) + ':' + pad(sec); };
 const pesoAtual = () => { const p = pesoSorted(); return p.length ? +p[p.length - 1].kg : null; };
 const MET = {leve: 3.5, moderado: 5.0, intenso: 6.0};
+function kcalSessao(x, kg, int){
+  kg = kg || 75; const ativo = tempoAtivo(x), tempos = x.exs.filter(e => e.tipo === 'tempo');
+  const feitos = tempos.filter(e => e.series[0].feita), minFeitos = feitos.reduce((a, e) => a + (+e.series[0].reps || 0), 0);
+  const correndo = tempos.find(e => e.cronoAte && !e.series[0].feita), msCrono = correndo ? Math.max(0, Math.min((+correndo.series[0].reps || 0) * 60000, (correndo.cronoMs || 0) - Math.max(0, correndo.cronoAte - agoraMs()))) : 0;
+  const soTempo = tempos.length === x.exs.length;
+  if (soTempo && !feitos.length) return Math.round((tempos[0] ? tempos[0].met : 5) * kg * ativo / 3600e3);
+  const msMusc = soTempo ? 0 : Math.max(0, ativo - minFeitos * 60000 - msCrono);
+  return Math.round(MET[int || 'moderado'] * kg * msMusc / 3600e3 + feitos.reduce((a, e) => a + e.met * kg * (+e.series[0].reps || 0) / 60, 0) + (correndo ? correndo.met * kg * msCrono / 3600e3 : 0));
+}
 const kcalTreino = (ms, kg, int) => Math.round(MET[int || 'moderado'] * (kg || 75) * ms / 3600e3);
 const totSeries = x => x.exs.reduce((a, e) => a + e.series.length, 0);
 const feitasSeries = x => x.exs.reduce((a, e) => a + e.series.filter(z => z.feita).length, 0);
 const volume = x => Math.round(x.exs.reduce((a, e) => a + e.series.filter(z => z.feita).reduce((b, z) => b + (+z.kg || 0) * (+z.reps || 0), 0), 0));
 
 function iniciarTreino(rotinaId){
-  const r = find(S.treinos.rotinas, rotinaId); if (!r) return;
+  const r0 = find(S.treinos.rotinas, rotinaId); if (!r0) return;
+  const r = Object.assign({}, r0, {exercicios: exerciciosDoDia(r0, today())});
   if (!(r.exercicios || []).length) return toast('Cadastre os exercícios da rotina primeiro.', true);
   const ult = [...S.treinos.feitos].reverse().find(f => f.rotinaId === r.id && f.exs);
-  sessao = {rotinaId: r.id, nome: r.nome, descanso: r.descanso || 60, inicio: agoraMs(), pausaTotal: 0, pausadoEm: null, descansoAte: null, descansoDe: null, foco: 0,
+  sessao = {rotinaId: r.id, nome: r.nome, notas: r.notas || '', descanso: r.descanso || 60, inicio: agoraMs(), pausaTotal: 0, pausadoEm: null, descansoAte: null, descansoDe: null, foco: 0,
     exs: r.exercicios.map((txt, i) => { const p = parseEx(txt), prev = ult && ult.exs[i] && ult.exs[i].nome === p.nome ? ult.exs[i] : null;
+      if (p.tipo === 'tempo') return {nome: p.nome, tipo: 'tempo', min: p.min, met: p.met, series: [{reps: p.min, kg: 0, feita: false}]};
       return {nome: p.nome, faixa: p.faixa, descanso: p.descanso, series: [...Array(p.series)].map((_, j) => ({reps: prev && prev.series[j] ? prev.series[j].reps : p.reps, kg: prev && prev.series[j] && prev.series[j].kg ? prev.series[j].kg : p.kg, feita: false}))}; })};
   salvarSessao(); abrirSessao();
 }
@@ -485,7 +502,11 @@ function fecharSessao(){ clearInterval(sessTick); soltarTela(); const w = $('#tr
 function tickSessao(){
   if (!sessao) return;
   const el = $('#tsTempo'); if (el) el.textContent = mmss(tempoAtivo(sessao));
-  const kc = $('#tsKcal'); if (kc) kc.textContent = fmt(kcalTreino(tempoAtivo(sessao), pesoAtual(), 'moderado'));
+  const kc = $('#tsKcal'); if (kc) kc.textContent = fmt(kcalSessao(sessao, pesoAtual(), sessao.int));
+  sessao.exs.forEach((e, i) => { if (e.tipo !== 'tempo' || !e.cronoAte || e.series[0].feita) return;
+    const rest = e.cronoAte - agoraMs(), el = $('#tsCr' + i); if (el) el.textContent = mmss(rest);
+    const bar = $('#tsCrB' + i); if (bar) bar.style.transform = `scaleX(${clamp(1 - rest / Math.max(1, e.cronoMs))})`;
+    if (rest <= 0) { e.series[0].feita = true; e.cronoAte = null; salvarSessao(); bip(); renderSessao(); toast(e.nome + ' concluída'); } });
   if (sessao.descansoAte && !sessao.pausadoEm) {
     const rest = sessao.descansoAte - agoraMs(), tot = (sessao.descansoDur || sessao.descanso) * 1000;
     const t = $('#tsRest'), ring = $('#tsRestRing');
@@ -505,10 +526,11 @@ function renderSessao(entrando){
     <header class="ts-head"><button class="round ghost" data-act="tsMin" aria-label="Minimizar treino">${ic('chev','s')}</button>
       <div class="ts-tit"><span class="small muted">${x.pausadoEm ? 'Pausado' : 'Treinando'}</span><b>${esc(x.nome)}</b></div>
       <button class="mini" data-act="tsFinalizar">Finalizar</button></header>
+    ${x.notas ? `<details class="ts-notas"><summary>Orientações deste treino</summary><p>${esc(x.notas).replace(/\n/g, '<br>')}</p></details>` : ''}
     <section class="ts-stats">
       <div class="ts-ring"><svg width="84" height="84"><circle cx="42" cy="42" r="${R}" class="trk" stroke-width="8" fill="none"/><circle cx="42" cy="42" r="${R}" stroke="var(--ok)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="${C}" style="stroke-dashoffset:${C * (1 - pc)};transition:stroke-dashoffset .6s var(--ease);transform:rotate(-90deg);transform-origin:center"/></svg><span class="num"><b>${fe}</b>/${tot}</span></div>
       <div class="ts-num"><span class="lbl">Tempo</span><b class="num" id="tsTempo">${mmss(tempoAtivo(x))}</b></div>
-      <div class="ts-num"><span class="lbl">kcal</span><b class="num" id="tsKcal">${fmt(kcalTreino(tempoAtivo(x), pesoAtual()))}</b></div>
+      <div class="ts-num"><span class="lbl">kcal</span><b class="num" id="tsKcal">${fmt(kcalSessao(x, pesoAtual(), x.int))}</b></div>
     </section>
     <div class="ts-ctrl"><button class="btn sec" data-act="tsPausa">${x.pausadoEm ? ic('chev','s') + 'Continuar' : '<span class="pz"></span>Pausar'}</button>
       <label class="ts-desc">Descanso<select class="inp" id="tsDescSel" data-change="tsDesc">${[30,45,60,75,90,120,150,180].map(v => `<option value="${v}"${v === x.descanso ? ' selected' : ''}>${v < 60 ? v + ' s' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min'}</option>`).join('')}</select></label></div>
@@ -517,11 +539,16 @@ function renderSessao(entrando){
       <div class="btnrow ts-rest-b"><button class="mini" data-act="tsMais">+15 s</button><button class="mini" data-act="tsPular">Pular descanso</button></div></section>` : ''}
     <section class="ts-list">${x.exs.map((e, i) => { const ok = e.series.every(z => z.feita), atual = pend && pend[0] === i;
       return `<div class="ts-ex${ok ? ' ok' : ''}${atual ? ' atual' : ''}" id="tsEx${i}"><div class="ts-ex-h"><span class="ts-n num">${ok ? ic('check','s') : i + 1}</span><b>${esc(e.nome)}${e.faixa || e.descanso ? `<span class="small muted" style="display:block;font-weight:500">${[e.faixa && 'meta ' + e.faixa + ' rep', e.descanso && 'descanso ' + e.descanso + ' s'].filter(Boolean).join(' · ')}</span>` : ''}</b><span class="small muted num">${e.series.filter(z => z.feita).length}/${e.series.length}</span></div>
+        ${e.tipo === 'tempo' ? (z => `<div class="ts-tempo"><div class="ts-set${z.feita ? ' feita' : ''}"><span class="small muted">Duração</span>
+            <label><input class="inp num" type="number" inputmode="numeric" min="1" value="${z.reps}" data-tsk="${i}.0.reps" aria-label="Minutos"><span>min</span></label>
+            ${z.feita ? '<span class="small up" style="font-weight:600">feita</span>' : e.cronoAte ? `<b class="num" id="tsCr${i}">${mmss(e.cronoAte - agoraMs())}</b>` : `<button class="mini" data-act="tsCrono" data-v="${i}">${ic('clock','s')}Iniciar</button>`}
+            <button class="check${z.feita ? ' on' : ''}" data-act="tsSerie" data-v="${i}.0" aria-label="Concluir ${esc(e.nome)}"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button></div>
+            ${e.cronoAte && !z.feita ? `<div class="hbar" style="margin:4px 8px 0"><i id="tsCrB${i}" style="transform:scaleX(0);transition:transform .25s linear"></i></div><div class="btnrow" style="gap:6px;margin-top:6px"><button class="link small" data-act="tsCronoStop" data-v="${i}">Parar cronômetro</button></div>` : ''}</div>`)(e.series[0]) : `
         <div class="ts-sets">${e.series.map((z, j) => `<div class="ts-set${z.feita ? ' feita' : ''}${atual && pend[1] === j ? ' prox' : ''}"><span class="small muted">Série ${j + 1}</span>
           <label><input class="inp num" type="number" inputmode="decimal" min="0" step="0.5" value="${z.kg || ''}" placeholder="kg" data-tsk="${i}.${j}.kg" aria-label="Carga em kg"><span>kg</span></label>
           <label><input class="inp num" type="number" inputmode="numeric" min="0" value="${z.reps}" data-tsk="${i}.${j}.reps" aria-label="Repetições"><span>rep</span></label>
           <button class="check${z.feita ? ' on' : ''}" data-act="tsSerie" data-v="${i}.${j}" aria-label="Concluir série ${j + 1} de ${esc(e.nome)}"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button></div>`).join('')}
-          <div class="btnrow" style="gap:6px"><button class="link small" data-act="tsAddSerie" data-v="${i}">+ série</button>${e.series.length > 1 ? `<button class="link small" data-act="tsRemSerie" data-v="${i}" style="color:var(--fg2)">− série</button>` : ''}</div></div></div>`; }).join('')}
+          <div class="btnrow" style="gap:6px"><button class="link small" data-act="tsAddSerie" data-v="${i}">+ série</button>${e.series.length > 1 ? `<button class="link small" data-act="tsRemSerie" data-v="${i}" style="color:var(--fg2)">− série</button>` : ''}<button class="link small" data-act="tsTrocar" data-v="${i}" style="margin-left:auto">Trocar exercício</button></div></div>`}</div>`; }).join('')}
       ${!pend ? `<div class="ts-fim"><b>Todas as séries concluídas</b><button class="btn pri wide" data-act="tsFinalizar">Finalizar treino</button></div>` : ''}</section>
   </div>`;
   w.querySelectorAll('[data-tsk]').forEach(inp => inp.addEventListener('input', () => { const [i, j, k] = inp.dataset.tsk.split('.'); sessao.exs[+i].series[+j][k] = Math.max(0, parseFloat(inp.value.replace(',', '.')) || 0); salvarSessao(); }));
@@ -532,7 +559,7 @@ function telaResumo(){
   const w = $('#treinoWrap');
   w.innerHTML = `<div class="ts ts-resumo entra">
     <div class="ts-trofeu">${ic('check')}</div><h2>Treino concluído</h2><p class="muted" style="margin:0">${esc(x.nome)}</p>
-    <div class="ts-kcal"><b class="num" id="trKcal">${fmt(kcalTreino(ms, kg, int))}</b><span>kcal estimadas</span></div>
+    <div class="ts-kcal"><b class="num" id="trKcal">${fmt(kcalSessao(x, kg, int))}</b><span>kcal estimadas</span></div>
     <div class="grid2" style="width:100%"><div class="card kpi"><span class="lbl">Duração</span><span class="val num">${mmss(ms)}</span></div>
       <div class="card kpi"><span class="lbl">Séries</span><span class="val num">${feitasSeries(x)}<small>/${totSeries(x)}</small></span></div>
       <div class="card kpi"><span class="lbl">Volume</span><span class="val num">${fmt(volume(x))}<small>kg</small></span></div>
@@ -545,7 +572,7 @@ function telaResumo(){
     <button class="link small" data-act="tsDescartar" style="color:var(--err)">Descartar sem salvar</button>
   </div>`;
   w.querySelectorAll('.seg').forEach(placeThumb);
-  const k = $('#trKcal'); if (k && !RM.matches) countUp(k, 0, kcalTreino(ms, kg, int), 0);
+  const k = $('#trKcal'); if (k && !RM.matches) countUp(k, 0, kcalSessao(x, kg, int), 0);
 }
 const ACT_TREINO = {
   iniciarTreino: el => iniciarTreino(el.dataset.id),
@@ -555,23 +582,30 @@ const ACT_TREINO = {
   tsSerie: el => {
     const [i, j] = el.dataset.v.split('.').map(Number), z = sessao.exs[i].series[j];
     z.feita = !z.feita; z.em = z.feita ? agoraMs() : null;
-    if (z.feita) { el.classList.add('on', 'pop'); if (proximaPendente(sessao)) { sessao.descansoDur = sessao.exs[i].descanso || sessao.descanso; sessao.descansoAte = agoraMs() + sessao.descansoDur * 1000; } else sessao.descansoAte = null; }
+    if (z.feita) { el.classList.add('on', 'pop'); if (sessao.exs[i].tipo === 'tempo') { sessao.exs[i].cronoAte = null; sessao.descansoAte = null; } else if (proximaPendente(sessao)) { sessao.descansoDur = sessao.exs[i].descanso || sessao.descanso; sessao.descansoAte = agoraMs() + sessao.descansoDur * 1000; } else sessao.descansoAte = null; }
     else sessao.descansoAte = null;
     if (sessao.pausadoEm) { sessao.pausaTotal += agoraMs() - sessao.pausadoEm; sessao.pausadoEm = null; }
     salvarSessao(); setTimeout(() => { renderSessao(); const p = proximaPendente(sessao); if (p && sessao.exs[p[0]].series[p[1]] && p[1] === 0) { const e = $('#tsEx' + p[0]); e && e.scrollIntoView({block: 'center', behavior: RM.matches ? 'auto' : 'smooth'}); } }, RM.matches ? 0 : 260);
   },
+  tsCrono: el => { const e = sessao.exs[+el.dataset.v]; e.cronoMs = (+e.series[0].reps || e.min || 20) * 60000; e.cronoAte = agoraMs() + e.cronoMs; sessao.descansoAte = null; if (sessao.pausadoEm) { sessao.pausaTotal += agoraMs() - sessao.pausadoEm; sessao.pausadoEm = null; } salvarSessao(); renderSessao(); },
+  tsCronoStop: el => { const e = sessao.exs[+el.dataset.v], feito = Math.max(0, (e.cronoMs || 0) - Math.max(0, e.cronoAte - agoraMs())); e.series[0].reps = Math.max(1, Math.round(feito / 60000)); e.series[0].feita = true; e.cronoAte = null; salvarSessao(); renderSessao(); toast(`${e.nome}: ${e.series[0].reps} min registrados`); },
+  tsTrocar: el => { const i = +el.dataset.v, e = sessao.exs[i], h = $('#tsEx' + i).querySelector('.ts-ex-h b'); if (!h || h.querySelector('input')) return;
+    h.innerHTML = `<input class="inp" id="tsNovoNome" value="${esc(e.nome)}" style="height:38px" aria-label="Novo exercício"><span class="small muted" style="display:block;font-weight:500;margin-top:4px">Troca só neste treino. Toque fora para confirmar.</span>`;
+    const inp = $('#tsNovoNome'); inp.focus(); inp.select();
+    const ok = () => { const v = inp.value.trim(); if (v && v !== e.nome) { e.trocadoDe = e.trocadoDe || e.nome; e.nome = v; salvarSessao(); toast('Exercício trocado neste treino'); } renderSessao(); };
+    inp.addEventListener('blur', ok, {once: true}); inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') inp.blur(); }); },
   tsMais: () => { sessao.descansoAte += 15000; salvarSessao(); tickSessao(); },
   tsPular: () => { sessao.descansoAte = null; salvarSessao(); renderSessao(); },
-  tsAddSerie: el => { const e = sessao.exs[+el.dataset.v], l = e.series[e.series.length - 1] || {reps: 12, kg: 0}; e.series.push({reps: l.reps, kg: l.kg, feita: false}); salvarSessao(); renderSessao(); },
+  tsAddSerie: el => { if (sessao.exs[+el.dataset.v].tipo === 'tempo') return; const e = sessao.exs[+el.dataset.v], l = e.series[e.series.length - 1] || {reps: 12, kg: 0}; e.series.push({reps: l.reps, kg: l.kg, feita: false}); salvarSessao(); renderSessao(); },
   tsRemSerie: el => { const e = sessao.exs[+el.dataset.v]; if (e.series.length > 1) e.series.pop(); salvarSessao(); renderSessao(); },
   tsFinalizar: () => { if (!feitasSeries(sessao)) return toast('Conclua pelo menos uma série ou descarte o treino.', true); sessao.fimEm = agoraMs(); if (sessao.pausadoEm) { sessao.pausaTotal += sessao.fimEm - sessao.pausadoEm; sessao.pausadoEm = null; } sessao.descansoAte = null; salvarSessao(); telaResumo(); },
   tsVoltar: () => { delete sessao.fimEm; salvarSessao(); renderSessao(true); },
-  tsInt: el => { sessao.int = el.dataset.v; el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); const k = $('#trKcal'); if (k) k.textContent = fmt(kcalTreino(tempoAtivo(sessao), pesoAtual() || num('trPeso'), sessao.int)); },
+  tsInt: el => { sessao.int = el.dataset.v; el.parentNode.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === el)); placeThumb(el.parentNode); const k = $('#trKcal'); if (k) k.textContent = fmt(kcalSessao(sessao, pesoAtual() || num('trPeso'), sessao.int)); },
   tsSalvar: () => {
     if (!sessao) return;
     const x = sessao, ms = tempoAtivo(x), kg = pesoAtual() || num('trPeso') || 75;
     const reg = {data: ymd(new Date(x.inicio)), rotinas: [x.rotinaId], rotinaId: x.rotinaId, nome: x.nome, inicio: x.inicio, duracao: Math.round(ms / 1000), series: feitasSeries(x), seriesTotal: totSeries(x),
-      volume: volume(x), int: x.int || 'moderado', pesoCalc: kg, kcal: kcalTreino(ms, kg, x.int), exs: x.exs.map(e => ({nome: e.nome, series: e.series.map(z => ({reps: z.reps, kg: z.kg, feita: z.feita}))}))};
+      volume: volume(x), int: x.int || 'moderado', pesoCalc: kg, kcal: kcalSessao(x, kg, x.int), exs: x.exs.map(e => ({nome: e.nome, series: e.series.map(z => ({reps: z.reps, kg: z.kg, feita: z.feita}))}))};
     S.treinos.feitos.push(reg);
     const r = find(S.treinos.rotinas, x.rotinaId); if (r) { r.descanso = x.descanso; r.exercicios = x.exs.map((e, i) => { const s0 = e.series[0] || {}; return `${e.nome} ${e.series.length}x${s0.reps || 12}${s0.kg ? ' ' + String(s0.kg).replace('.', ',') + 'kg' : ''}`; }); }
     if (S.treinos.feitos.length > 800) S.treinos.feitos = S.treinos.feitos.slice(-800);
@@ -581,7 +615,15 @@ const ACT_TREINO = {
     const b = document.querySelector('[data-act=tsDescartar]'); b.insertAdjacentHTML('afterend', '<div class="confirm" id="tsCfm" style="width:100%"><b>Descartar este treino? Nada será salvo.</b><div class="btnrow"><button class="btn sec" data-act="tsCfmNo">Manter</button><button class="btn dan" data-act="tsDescartar">Descartar</button></div></div>'); },
   tsCfmNo: () => { const c = $('#tsCfm'); c && c.remove(); },
   delTreinoFeito: el => { if (!confirm('Apagar este treino registrado? Isso não pode ser desfeito.')) return; S.treinos.feitos = S.treinos.feitos.filter(f => String(f.inicio || f.data) !== el.dataset.v); save('treinos'); render(false); toast('Registro apagado'); },
-  diaTreino: el => { const d = el.dataset.v; if (d > today()) return; if (treinoFeito(d)) {
+  abrirDia: el => sheetDiaTreino(el.dataset.v),
+  diaSalvar: el => { const dia = el.dataset.v, sempre = $('#dSempre').classList.contains('on'); let n = 0;
+    document.querySelectorAll('#sheetBody textarea[data-rot]').forEach(ta => { const r = find(S.treinos.rotinas, ta.dataset.rot); if (!r) return;
+      const ex = ta.value.split('\n').map(x => x.trim()).filter(Boolean), igual = ex.join('\n') === (r.exercicios || []).join('\n');
+      if (sempre) { r.exercicios = ex; setAjuste(dia, x => { if (x.ex) delete x.ex[r.id]; }); n++; }
+      else setAjuste(dia, x => { x.ex = x.ex || {}; if (igual) delete x.ex[r.id]; else { x.ex[r.id] = ex; n++; } }); });
+    save('treinos'); closeSheet(); render(false); toast(sempre ? 'Rotina atualizada' : n ? 'Treino deste dia alterado' : 'Sem mudanças'); },
+  diaRestaurar: el => { const dia = el.dataset.v; if (S.treinos.ajustes) delete S.treinos.ajustes[dia]; save('treinos'); closeSheet(); render(false); toast('Treino programado restaurado'); },
+  diaTreino: el => { const d = el.dataset.v; if (d > today()) return; closeSheet(); if (treinoFeito(d)) {
     const completos = S.treinos.feitos.filter(f => f.data === d && (f.duracao || f.series));
     if (completos.length && !confirm(`Desmarcar ${ddmm(d)} apaga ${completos.length > 1 ? 'os treinos registrados' : 'o treino registrado'} nesse dia (séries, tempo e calorias). Continuar?`)) return;
     S.treinos.feitos = S.treinos.feitos.filter(f => f.data !== d); toast('Treino desmarcado em ' + ddmm(d)); } else { S.treinos.feitos.push({data: d, rotinas: rotinasDe(d).map(r => r.id)}); toast('Treino marcado em ' + ddmm(d)); } save('treinos'); render(false); },
@@ -623,19 +665,26 @@ const DIAS_RE = [['domingo',0],['segunda',1],['terça',2],['terca',2],['quarta',
 function interpretarTreino(txt){
   const brutas = String(txt || '').replace(/\r/g, '').replace(/\t/g, '   ').split('\n').map(l => l.trim()).filter(Boolean);
   const linhas = brutas.map(l => l.replace(/ +/g, ' '));
-  const blocos = []; let atual = null;
-  const novo = (nome, dias) => { atual = {nome, dias, ex: [], descanso: 0}; blocos.push(atual); };
+  const blocos = []; let atual = null, secaoGeral = false; const geral = [];
+  const novo = (nome, dias) => { atual = {nome, dias, ex: [], descanso: 0, notas: []}; blocos.push(atual); secaoGeral = false; };
+  const addNota = (arr, t) => { const limpo = t.replace(/^[•\-–*]\s*/, '').trim(), ult = arr[arr.length - 1]; if (ult && !/^[•\-–*]/.test(t) && !/[.!?:;]$/.test(ult)) arr[arr.length - 1] = ult + ' ' + limpo; else arr.push(/^[•\-–*]/.test(t) ? '• ' + limpo : limpo); };
   const reSeries = /(\d{1,2})\s*(?:x|×|X|\*)\s*(\d{1,3}(?:\s*(?:a|-|–|\/)\s*\d{1,3}(?!\s*kg|[.,]\d))?|falha|max|máx)/i;
   const reSeries2 = /(\d{1,2})\s*s[ée]ries?\s*(?:de|x)?\s*(\d{1,3}(?:\s*(?:a|-|–|\/)\s*\d{1,3})?)\s*(?:repeti[çc][õo]es|reps?)\b/i;
   for (const [ix, l0] of linhas.entries()) {
     const bruta = brutas[ix];
+    if (/p[áa]gina\s*\d+\s*$/i.test(l0) || /^exerc[ií]cio\s{1,}s[ée]ries/i.test(l0)) continue;          // rodapé e cabeçalho de tabela
+    if (/^(diretrizes|observa[çc][õo]es|orienta[çc][õo]es|recomenda[çc][õo]es|dicas|importante)\b/i.test(l0) && l0.length < 70) { secaoGeral = true; geral.push('', l0.toUpperCase()); continue; }
+    if (/^objetivo\s*:/i.test(l0)) { geral.unshift(l0); continue; }
+    if (secaoGeral) { addNota(geral, l0); continue; }
+    if (!atual && geral.length && /^objetivo/i.test(geral[0]) && !/^divis/i.test(l0) && !/\S\s{3,}\S/.test(bruta)) { geral[0] += ' ' + l0; continue; }
     const l = l0.replace(/^[\d]{1,2}\s*[.)\-–]\s*/, '').replace(/^[•\-–*]\s*/, '');
     const low = l.toLowerCase();
     const desc = low.match(/descanso[^0-9]{0,12}(\d{1,3})\s*(s|seg|"|min|')?/);
     if (desc && atual) { let v = +desc[1]; if (/min|'/.test(desc[2] || '') || v <= 5) v *= 60; atual.descanso = Math.max(atual.descanso, Math.min(300, v)); }
     const ehCab = /^(treino|ficha|rotina|dia|divis[aã]o)\s*[a-z0-9]{0,3}\b/i.test(l) && !reSeries.test(l) && l.length < 60
       || /^[A-E]\s*[-–:)]\s*\D{3,}$/.test(l) && l.length < 50
-      || DIAS_RE.some(([d]) => low.startsWith(d)) && !reSeries.test(l) && l.length < 60;
+      || DIAS_RE.some(([d]) => low.startsWith(d)) && !reSeries.test(l) && l.length < 60 && !/\S\s{3,}\S/.test(bruta);
+    if (!ehCab && DIAS_RE.some(([d]) => low.startsWith(d)) && /\S\s{3,}\S/.test(bruta)) continue;   // linha da tabela de divisão semanal   // linha da tabela de divisão semanal
     if (ehCab) { const dias = DIAS_RE.filter(([d]) => low.includes(d)).map(([, i]) => i); novo(l.replace(/[:\-–]\s*$/, '').trim(), [...new Set(dias)]); continue; }
     // linha de tabela: EXERCÍCIO   SÉRIES   REPETIÇÕES   [DESCANSO]   [CARGA]
     const tab = bruta.replace(/^\d{1,2}\s*[.)\-–]\s*/, '').match(/^(.*?[a-zà-ú)\]])\s{2,}(\d{1,2})\s{2,}(\d{1,3}(?:\s*(?:-|–|a|\/)\s*\d{1,3})?)(?:\s{2,}(\d{1,3})\s*(s|seg|segundos|min|')?)?(?:\s{2,}(\d{1,3}(?:[.,]\d+)?)\s*kg)?\s*$/i);
@@ -647,11 +696,14 @@ function interpretarTreino(txt){
       if (dsc) atual.descansos = (atual.descansos || []).concat(dsc);
       continue;
     }
+    const tmin = l.match(/^(.{3,50}?)\s*[:\-–]\s*(\d{1,3})\s*(?:min|minutos)\b(.*)$/i) || l.match(/^(.{3,50}?)\s+(\d{1,3})\s*(?:min|minutos)\b(.*)$/i);
+    if (tmin && !reSeries.test(l) && /[a-zà-ú]{3,}/i.test(tmin[1]) && !/,/.test(tmin[1]) && !/^(se|reduzir|manter|at[ée]|por|ou|e|evitar|fazer|n[ãa]o)\b/i.test(tmin[1])) { if (!atual) novo('Treino importado', []);
+      atual.ex.push(`${tmin[1].replace(/[•·:]+\s*$/, '').trim()} ${tmin[2]}min`); if (tmin[3] && tmin[3].replace(/[•·\s]/g, '').length > 3) addNota(atual.notas, l); continue; }
     let m = l.match(reSeries) || l.match(reSeries2), series, reps, nome;
     if (m) { series = +m[1]; reps = m[2]; nome = l.replace(m[0], ''); }
     else { const t = l.match(/^(.{3,}?[a-zà-ú)])\s+(\d{1,2})\s+(\d{1,3})(?:\s+(\d{1,3}(?:[.,]\d)?))?(?:\s|$)/i);
       if (t && +t[2] <= 10 && +t[3] <= 60) { series = +t[2]; reps = t[3]; nome = t[1] + (t[4] ? ` ${t[4]}kg` : ''); } }
-    if (!series || series > 12) continue;
+    if (!series || series > 12) { if (atual && l.length > 3 && /[a-zà-ú]{3,}/i.test(l)) addNota(atual.notas, l0); continue; }
     const kg = l.match(/(\d{1,3}(?:[.,]\d+)?)\s*kg/i);
     nome = nome.replace(/(\d{1,3}(?:[.,]\d+)?)\s*kg/ig, '').replace(/descanso.*$/i, '').replace(/s[ée]ries?|repeti[çc][õo]es|reps?\b/ig, '').replace(/[|·•\-–:;,]+\s*$/,'').replace(/^\s*[|·•\-–:;,]+/,'').replace(/\s{2,}/g, ' ').trim();
     if (!/[a-zà-ú]{3,}/i.test(nome)) continue;
@@ -659,8 +711,9 @@ function interpretarTreino(txt){
     const repsTxt = String(reps).replace(/\s+/g, '').replace(/[–\/]/g, '-');
     atual.ex.push(`${nome[0].toUpperCase() + nome.slice(1)} ${series}x${/^\d/.test(repsTxt) ? repsTxt.replace(/a/g, '-') : 12}${kg ? ' ' + kg[1] + 'kg' : ''}`);
   }
+  blocos.forEach(b => { if (!b.ex.length && b.dias.length) { const atv = (b.nome.split(/\s[—–-]\s|:\s/)[1] || b.nome).trim(); b.ex.push(`${/aula|treino|calistenia|corrida|caminhada|bike|spinning|strong|funcional|nata/i.test(atv) ? atv : 'Atividade: ' + atv} 60min`); b.notas.unshift('Duração estimada em 60 min; ajuste no app se for diferente.'); } });
   blocos.forEach(b => { if (!b.descanso && b.descansos) { const c = {}; b.descansos.forEach(v => c[v] = (c[v] || 0) + 1); b.descanso = +Object.entries(c).sort((x, y) => y[1] - x[1])[0][0]; } });
-  return blocos.filter(b => b.ex.length);
+  const out = blocos.filter(b => b.ex.length); out.orientacoes = geral.join('\n').trim(); return out;
 }
 let impBlocos = [];
 function sheetImportTreino(){
@@ -685,15 +738,18 @@ function treinoDeJSON(txt){
     const exs = (r.exercicios || r.exercises || r.itens || []).map(e => {
       if (typeof e === 'string') return e.trim();
       const nome = String(e.nome || e.exercicio || e.name || '').trim(); if (!nome) return '';
+      const dur = parseInt(e.minutos || e.duracao || e.duration || e.min || 0, 10); if (dur && !e.series && !e.sets) return `${nome} ${dur}min`;
       const series = +(e.series || e.sets || 3) || 3, reps = String(e.repeticoes || e.reps || e.repetições || 12).match(/\d+/), kg = parseFloat(String(e.carga || e.kg || e.peso || e.weight || '').replace(',', '.'));
       return `${nome} ${series}x${reps ? reps[0] : 12}${kg ? ' ' + kg + 'kg' : ''}`;
     }).filter(Boolean);
     const desc = parseInt(r.descanso || r.rest || r.descanso_segundos || 0, 10) || 0;
-    return {nome: String(r.nome || r.name || r.treino || 'Treino ' + 'ABCDEFG'[i]).slice(0, 60), dias: [...new Set((Array.isArray(r.dias) ? r.dias : r.dias ? [r.dias] : []).map(diaNum).filter(x => x != null))], ex: exs, descanso: desc};
+    return {notas: [r.observacoes || r.notas || r.obs || r.notes || ''].flat().filter(Boolean), nome: String(r.nome || r.name || r.treino || 'Treino ' + 'ABCDEFG'[i]).slice(0, 60), dias: [...new Set((Array.isArray(r.dias) ? r.dias : r.dias ? [r.dias] : []).map(diaNum).filter(x => x != null))], ex: exs, descanso: desc};
   }).filter(b => b.ex.length);
 }
+const comOrient = (lista, d) => { if (lista) lista.orientacoes = String((d && (d.orientacoes || d.observacoes || d.diretrizes)) || '').trim(); return lista; };
 function mostrarImport(txt){
-  impBlocos = treinoDeJSON(txt) || interpretarTreino(txt);
+  let dj = null; try { dj = JSON.parse(txt); } catch(e) {}
+  impBlocos = comOrient(treinoDeJSON(txt), dj) || interpretarTreino(txt);
   const st = $('#itStatus'), box = $('#itPrev'); if (!box) return;
   if (!impBlocos.length) { st.textContent = 'Não encontrei exercícios com séries e repetições (ex.: "Supino 4x10"). Cole o texto e ajuste o formato, ou monte a rotina à mão.'; box.innerHTML = ''; if (!$('#itTxt').value) $('#itTxt').value = String(txt).slice(0, 4000); $('#sheetBody details').open = true; return; }
   st.textContent = `Encontrei ${impBlocos.length} ${impBlocos.length === 1 ? 'treino' : 'treinos'} com ${impBlocos.reduce((a, b) => a + b.ex.length, 0)} exercícios. Confira e ajuste:`;
@@ -701,8 +757,9 @@ function mostrarImport(txt){
       <div class="switch"><input class="inp" id="itN${i}" value="${esc(b.nome)}" aria-label="Nome da rotina"><button type="button" class="sw on" id="itOn${i}" data-act="sw" role="switch" aria-checked="true" aria-label="Importar esta rotina"></button></div>
       <div class="toggles" id="itD${i}">${[1,2,3,4,5,6,0].map(d => `<button type="button" class="${b.dias.includes(d) ? 'on' : ''}" data-act="tgl" data-v="${d}" aria-label="${DOW[d]}">${DOW1[d]}</button>`).join('')}</div>
       <textarea class="inp" id="itE${i}" rows="${Math.min(12, b.ex.length + 1)}">${esc(b.ex.join('\n'))}</textarea>
+      <textarea class="inp small" id="itO${i}" rows="${b.notas && b.notas.length ? Math.min(5, b.notas.length + 1) : 2}" placeholder="Orientações deste treino (opcional)">${esc((b.notas || []).join('\n'))}</textarea>
       <label class="small muted">Descanso <select class="inp" id="itR${i}" style="height:36px;display:inline-block;width:auto;margin-left:6px">${[30,45,60,75,90,120,150,180].map(v => opt(String(v), v < 60 ? v + ' s' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min', String(b.descanso && [30,45,60,75,90,120,150,180].includes(b.descanso) ? b.descanso : 60))).join('')}</select></label>
-    </div>`).join('') + `<button type="button" class="btn pri wide" data-act="itSalvar">Criar rotinas</button>`;
+    </div>`).join('') + (impBlocos.orientacoes ? `<div class="field"><label for="itG">Orientações gerais do plano</label><textarea class="inp" id="itG" rows="8">${esc(impBlocos.orientacoes)}</textarea></div>` : '') + `<button type="button" class="btn pri wide" data-act="itSalvar">Criar rotinas</button>`;
   if (!RM.matches) box.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 360});
 }
 
@@ -817,7 +874,32 @@ function pesoDelta(days){
   const last = s[s.length-1], ref = [...s].reverse().find(x => x.data <= addDays(last.data, -days)) || s[0];
   return ref === last ? null : +(last.kg - ref.kg).toFixed(1);
 }
-const rotinasDe = dia => S.treinos.rotinas.filter(r => (r.dias||[]).includes(parseD(dia).getDay()));
+const ajusteDia = dia => ((S.treinos.ajustes || {})[dia]) || null;
+const rotinasDe = dia => { const a = ajusteDia(dia); if (a && Array.isArray(a.rotinas)) return a.rotinas.map(id => find(S.treinos.rotinas, id)).filter(Boolean);
+  return S.treinos.rotinas.filter(r => (r.dias||[]).includes(parseD(dia).getDay())); };
+const exerciciosDoDia = (r, dia) => { const a = ajusteDia(dia); return a && a.ex && Array.isArray(a.ex[r.id]) ? a.ex[r.id] : (r.exercicios || []); };
+function setAjuste(dia, fn){ S.treinos.ajustes = S.treinos.ajustes || {}; const a = S.treinos.ajustes[dia] || {}; fn(a);
+  if ((!a.ex || !Object.keys(a.ex).length) && !Array.isArray(a.rotinas)) delete S.treinos.ajustes[dia]; else S.treinos.ajustes[dia] = a;
+  const lim = addDays(today(), -60); Object.keys(S.treinos.ajustes).forEach(d => { if (d < lim) delete S.treinos.ajustes[d]; }); }
+function sheetDiaTreino(dia){
+  const rot = rotinasDe(dia), a = ajusteDia(dia), dd = parseD(dia), feito = treinoFeito(dia), t = today();
+  const titulo = (dia === t ? 'Hoje' : DOW[dd.getDay()]) + ', ' + ddmm(dia);
+  openSheet('Treino · ' + titulo, `<div class="form">
+    <div class="field"><label for="dRot">Rotina deste dia</label><select class="inp" id="dRot"><option value="">Descanso (sem treino)</option>${S.treinos.rotinas.map(r => opt(r.id, r.nome, rot[0] ? rot[0].id : '')).join('')}</select>
+      <span class="small muted">${a && Array.isArray(a.rotinas) ? 'Alterado só neste dia.' : 'Conforme a programação da semana.'}</span></div>
+    ${rot.map(r => { const exs = exerciciosDoDia(r, dia), mud = a && a.ex && a.ex[r.id];
+      return `<div class="field"><label for="dEx_${r.id}">Exercícios de ${esc(r.nome)} neste dia${mud ? ' <span class="pill warn">alterado</span>' : ''}</label>
+        <textarea class="inp" id="dEx_${r.id}" data-rot="${r.id}" rows="${Math.min(12, exs.length + 1)}">${esc(exs.join('\n'))}</textarea>
+        <span class="small muted">Troque, inclua ou tire exercícios. Vale só para ${dia === t ? 'hoje' : 'este dia'}; a rotina continua igual.</span></div>`; }).join('')}
+    ${r0Notas(rot)}
+    <div class="switch"><div><b>Também mudar a rotina</b><div class="small muted">Aplica as mudanças de exercícios em todas as semanas</div></div><button type="button" class="sw" id="dSempre" data-act="sw" role="switch" aria-checked="false"></button></div>
+    <button type="button" class="btn pri wide" data-act="diaSalvar" data-v="${dia}">Salvar este dia</button>
+    ${a ? `<button type="button" class="btn sec wide" data-act="diaRestaurar" data-v="${dia}">Voltar ao treino programado</button>` : ''}
+    ${dia <= t ? `<button type="button" class="btn sec wide" data-act="diaTreino" data-v="${dia}">${feito ? 'Desmarcar treino feito' : 'Marcar treino como feito'}</button>` : ''}
+  </div>`);
+  const sel = $('#dRot'); sel.addEventListener('change', () => { setAjuste(dia, x => { x.rotinas = sel.value ? [sel.value] : []; if (x.ex) Object.keys(x.ex).forEach(k => { if (k !== sel.value) delete x.ex[k]; }); }); save('treinos'); sheetDiaTreino(dia); render(false); });
+}
+const r0Notas = rot => rot.filter(r => r.notas).map(r => `<details class="ts-notas"><summary>Orientações de ${esc(r.nome)}</summary><p>${esc(r.notas).replace(/\n/g, '<br>')}</p></details>`).join('');
 const treinoFeito = dia => S.treinos.feitos.some(f => f.data === dia);
 const refeicoesDe = dia => S.alimentacao.refeicoes.filter(r => r.data === dia);
 const somaDia = dia => refeicoesDe(dia).reduce((a, r) => ({p:a.p+(+r.p||0), c:a.c+(+r.c||0), g:a.g+(+r.g||0), k:a.k+mealKcal(r)}), {p:0,c:0,g:0,k:0});
@@ -1295,16 +1377,18 @@ function corpoTreino(){
   const semana = week.filter(x => treinoFeito(x)).length, plano = week.filter(x => rotinasDe(x).length).length;
   const hist = S.treinos.feitos.filter(f => f.duracao).slice(-8).reverse();
   const outras = S.treinos.rotinas.filter(r => !rot.includes(r));
-  const rotCard = r => { const exs = (r.exercicios || []).map(parseEx), feita = feitosHoje.find(f => f.rotinaId === r.id);
-    return `<div class="rot-hoje"><div class="sec-row"><b style="font-size:20px">${esc(r.nome)}</b>${feita ? `<span class="pill ok">${feita.duracao ? mmss(feita.duracao * 1000) + ' · ' + fmt(feita.kcal) + ' kcal' : 'feito'}</span>` : `<span class="small muted">${exs.length} exercícios · ${exs.reduce((a, e) => a + e.series, 0)} séries</span>`}</div>
-      <div class="list" style="margin:6px 0 12px">${exs.map(e => `<div class="row" style="padding:8px 0"><span class="grow">${esc(e.nome)}</span><span class="small muted num">${e.series}×${e.faixa || e.reps}${e.kg ? ' · ' + fmt(e.kg, e.kg % 1 ? 1 : 0) + ' kg' : ''}${e.descanso ? ' · ' + e.descanso + ' s' : ''}</span></div>`).join('') || '<p class="muted small">Sem exercícios cadastrados.</p>'}</div>
+  const rotCard = r => { const exs = exerciciosDoDia(r, t).map(parseEx), alt = (ajusteDia(t) || {}).ex && ajusteDia(t).ex[r.id], feita = feitosHoje.find(f => f.rotinaId === r.id);
+    return `<div class="rot-hoje"><div class="sec-row"><b style="font-size:20px">${esc(r.nome)}</b>${feita ? `<span class="pill ok">${feita.duracao ? mmss(feita.duracao * 1000) + ' · ' + fmt(feita.kcal) + ' kcal' : 'feito'}</span>` : `<span class="small muted">${(m => { const tp = exs.filter(e => e.tipo === "tempo"), ms = m.length; return [ms && `${ms} ${ms === 1 ? "exercício" : "exercícios"} · ${m.reduce((a, e) => a + e.series, 0)} séries`, tp.length && tp.map(e => e.min + " min").join(" + ")].filter(Boolean).join(" · "); })(exs.filter(e => e.tipo !== "tempo"))}</span>`}</div>
+      <div class="list" style="margin:6px 0 12px">${exs.map(e => `<div class="row" style="padding:8px 0"><span class="grow">${esc(e.nome)}</span><span class="small muted num">${e.tipo === 'tempo' ? e.min + ' min' : `${e.series}×${e.faixa || e.reps}`}${e.kg ? ' · ' + fmt(e.kg, e.kg % 1 ? 1 : 0) + ' kg' : ''}${e.descanso ? ' · ' + e.descanso + ' s' : ''}</span></div>`).join('') || '<p class="muted small">Sem exercícios cadastrados.</p>'}</div>
       ${sessao && sessao.rotinaId === r.id ? `<button class="btn pri wide" data-act="retomarTreino">${ic('dumbbell','s')}Voltar ao treino · ${mmss(tempoAtivo(sessao))}</button>`
-        : `<button class="btn ${feita ? 'sec' : 'pri'} wide btn-iniciar" data-act="iniciarTreino" data-id="${r.id}">${ic('dumbbell','s')}${feita ? 'Treinar de novo' : 'Iniciar treino'}</button>`}</div>`; };
+        : `<button class="btn ${feita ? 'sec' : 'pri'} wide btn-iniciar" data-act="iniciarTreino" data-id="${r.id}">${ic('dumbbell','s')}${feita ? 'Treinar de novo' : 'Iniciar treino'}</button>`}
+      <div class="btnrow" style="margin-top:8px;justify-content:space-between">${alt ? '<span class="pill warn">alterado para hoje</span>' : '<span></span>'}<button class="link small" data-act="abrirDia" data-v="${t}">Alterar treino de hoje</button></div>
+      ${r.notas ? `<details class="ts-notas" style="margin-top:8px"><summary>Orientações</summary><p>${esc(r.notas).replace(/\n/g, '<br>')}</p></details>` : ''}</div>`; };
   return `
   ${sessao ? `<button class="banner rv ativo-treino" data-act="retomarTreino">${ic('dumbbell')}<div class="grow" style="text-align:left"><b>Treino em andamento: ${esc(sessao.nome)}</b><br><span class="muted small">${feitasSeries(sessao)} de ${totSeries(sessao)} séries · toque para voltar</span></div>${ic('chev','s')}</button>` : ''}
   <section class="card rv"><div class="sec-row" style="margin-bottom:12px"><h2 style="margin:0">Esta semana</h2><span class="small muted"><b class="num">${semana}</b> de ${plano || 0} planejados</span></div>
-    <div class="week">${week.map(x => { const dd = parseD(x); return `<button class="wd${x === t ? ' today' : ''}${treinoFeito(x) ? ' done' : ''}" data-act="diaTreino" data-v="${x}" ${x > t ? 'disabled' : ''} aria-label="${treinoFeito(x) ? 'Desmarcar' : 'Marcar'} treino em ${ddmm(x)}"><span class="l">${DOW1[dd.getDay()]}</span><span class="n num">${dd.getDate()}</span><span class="m${rotinasDe(x).length ? ' on' : ''}"></span></button>`; }).join('')}</div>
-    <p class="small muted" style="margin:10px 0 0">Toque num dia para marcar ou desmarcar um treino feito fora do app.</p>
+    <div class="week">${week.map(x => { const dd = parseD(x); return `<button class="wd${x === t ? ' today' : ''}${treinoFeito(x) ? ' done' : ''}" data-act="abrirDia" data-v="${x}" aria-label="Treino de ${DOW[dd.getDay()]}, ${ddmm(x)}"><span class="l">${DOW1[dd.getDay()]}</span><span class="n num">${dd.getDate()}</span><span class="m${rotinasDe(x).length ? ' on' : ''}"></span></button>`; }).join('')}</div>
+    <p class="small muted" style="margin:10px 0 0">Toque num dia para ver o treino, trocar a rotina, alterar os exercícios daquele dia ou marcar como feito.</p>
   </section>
   <section class="card rv"><h2>Treino de hoje</h2>
     ${rot.length ? rot.map(rotCard).join('<hr class="sep">')
@@ -1314,6 +1398,7 @@ function corpoTreino(){
   <section class="grid2"><div class="card kpi rv"><span class="lbl">Treinos em 30 dias</span><span class="val num" data-count="${n30}" data-k="t30">0</span></div>
     <div class="card kpi rv"><span class="lbl">Gasto em 7 dias</span><span class="val num"><span data-count="${kcal7}" data-k="tk7">0</span><small>kcal</small></span></div></section>
   ${hist.length ? `<section class="card rv"><h2>Últimos treinos</h2><div class="list">${hist.map(f => `<div class="row"><div class="grow"><div class="t">${esc(f.nome || 'Treino')}</div><div class="s num">${parseD(f.data).toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'})} · ${mmss(f.duracao * 1000)} · ${f.series} séries${f.volume ? ' · ' + fmt(f.volume) + ' kg' : ''}</div></div><b class="num">${fmt(f.kcal)}</b><span class="small muted">kcal</span><button class="round ghost" data-act="delTreinoFeito" data-v="${f.inicio}" aria-label="Apagar registro">${ic('trash','s')}</button></div>`).join('')}</div></section>` : ''}
+  ${S.treinos.orientacoes ? `<section class="card rv"><details class="ts-notas"><summary><b>Orientações do plano</b></summary><p>${esc(S.treinos.orientacoes).replace(/\n/g, '<br>')}</p></details><button class="link small" data-act="editOrient" style="margin-top:6px">Editar</button></section>` : ''}
   ${S.treinos.rotinas.length ? `<section class="card rv"><div class="sec-row"><h2>Rotinas</h2><button class="link small" data-act="importTreino">Importar de arquivo</button></div><div class="list">${S.treinos.rotinas.map(r => `<button class="row rowbtn" data-act="editRotina" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${(r.dias||[]).length ? [...r.dias].sort((a,b) => ((a+6)%7) - ((b+6)%7)).map(i => DOW[i]).join(', ') : 'Sem dia fixo'} · ${(r.exercicios||[]).length} exercícios · descanso ${r.descanso || 60} s</div></div>${ic('chev','s chev')}</button>`).join('')}</div></section>` : ''}`;
 }
 function corpoAlim(){
@@ -1746,6 +1831,7 @@ function sheetRotina(r){
     <div class="field"><label for="rNome">Nome</label><input class="inp" id="rNome" value="${esc(r.nome)}" placeholder="Treino A · Peito e tríceps" required autofocus></div>
     <div class="field"><label>Dias da semana</label><div class="toggles" id="rDias">${[1,2,3,4,5,6,0].map(i => `<button type="button" class="${(r.dias||[]).includes(i) ? 'on' : ''}" data-act="tgl" data-v="${i}" aria-label="${DOW[i]}">${DOW1[i]}</button>`).join('')}</div></div>
     <div class="field"><label for="rEx">Exercícios (um por linha: nome, séries x repetições e carga)</label><textarea class="inp" id="rEx" rows="8" placeholder="Supino reto 4x10 40kg&#10;Crucifixo 3x12 14kg&#10;Tríceps corda 3x15 25kg&#10;Prancha 3x45">${esc((r.exercicios||[]).join('\n'))}</textarea><span class="small muted">Sem séries informadas, o app usa 3x12. A carga é opcional.</span></div>
+    <div class="field"><label for="rNotas">Orientações (opcional)</label><textarea class="inp" id="rNotas" rows="3" placeholder="Ex.: manter 1–3 repetições em reserva">${esc(r.notas || '')}</textarea></div>
     <div class="field"><label for="rDesc">Descanso entre séries</label><select class="inp" id="rDesc">${[30,45,60,75,90,120,150,180].map(v => opt(String(v), v < 60 ? v + ' segundos' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min', String(r.descanso || 60))).join('')}</select></div>
     <button class="btn pri wide">Salvar rotina</button>
     ${!novo ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir rotina</button>${confirmBox('Excluir esta rotina?', 'delRotina', r.id)}` : ''}
@@ -2054,13 +2140,16 @@ const ACT = {
   delPeso: el => { if (!confirm(`Apagar o peso de ${ddmm(el.dataset.v)}?`)) return; S.peso.items = S.peso.items.filter(p => p.data !== el.dataset.v); save('peso'); render(false); toast('Registro apagado'); },
   novaRotina: () => sheetRotina(null),
   importTreino: () => sheetImportTreino(),
+  editOrient: () => { openSheet('Orientações do plano', `<div class="form"><textarea class="inp" id="oTxt" rows="14">${esc(S.treinos.orientacoes || '')}</textarea><button type="button" class="btn pri wide" data-act="salvarOrient">Salvar</button></div>`); },
+  salvarOrient: () => { S.treinos.orientacoes = val('oTxt'); save('treinos'); closeSheet(); render(false); toast('Orientações salvas'); },
   itColar: () => { const t = $('#itTxt').value.trim(); if (!t) return toast('Cole o texto do treino.', true); mostrarImport(t); },
   itSalvar: () => {
     let n = 0;
     impBlocos.forEach((b, i) => { if (!$('#itOn' + i).classList.contains('on')) return;
       const ex = val('itE' + i).split('\n').map(x => x.trim()).filter(Boolean); if (!ex.length) return;
-      S.treinos.rotinas.push({id: uid(), nome: val('itN' + i) || b.nome, dias: [...document.querySelectorAll('#itD' + i + ' .on')].map(x => +x.dataset.v), exercicios: ex, descanso: +val('itR' + i) || 60}); n++; });
+      S.treinos.rotinas.push({id: uid(), notas: val('itO' + i), nome: val('itN' + i) || b.nome, dias: [...document.querySelectorAll('#itD' + i + ' .on')].map(x => +x.dataset.v), exercicios: ex, descanso: +val('itR' + i) || 60}); n++; });
     if (!n) return toast('Nenhuma rotina marcada para importar.', true);
+    if ($('#itG') && val('itG')) S.treinos.orientacoes = val('itG');
     save('treinos'); closeSheet(); render(false); toast(`${n} ${n === 1 ? 'rotina criada' : 'rotinas criadas'}`);
   },
   editRotina: el => sheetRotina(find(S.treinos.rotinas, el.dataset.id)),
@@ -2192,7 +2281,7 @@ const FORMS = {
   rotina: f => {
     if (!val('rNome')) return toast('Dê um nome à rotina.', true);
     const id = f.dataset.id, r = id ? find(S.treinos.rotinas, id) : {id: uid()};
-    Object.assign(r, {nome: val('rNome'), descanso: +val('rDesc') || 60, dias: [...document.querySelectorAll('#rDias .on')].map(b => +b.dataset.v), exercicios: val('rEx').split('\n').map(s => s.trim()).filter(Boolean)});
+    Object.assign(r, {nome: val('rNome'), notas: val('rNotas'), descanso: +val('rDesc') || 60, dias: [...document.querySelectorAll('#rDias .on')].map(b => +b.dataset.v), exercicios: val('rEx').split('\n').map(s => s.trim()).filter(Boolean)});
     if (!id) S.treinos.rotinas.push(r); save('treinos'); closeSheet(); render(false); toast('Rotina salva');
   },
   refeicao: () => {
