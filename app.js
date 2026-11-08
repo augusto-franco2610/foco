@@ -586,6 +586,93 @@ const ACT_TREINO = {
 };
 document.addEventListener('visibilitychange', () => { if (!document.hidden && sessao && !$('#treinoWrap')?.hidden) { pedirTelaLigada(); tickSessao(); } });
 
+
+/* ================= importar treino de arquivo ================= */
+const carregarScript = (src) => new Promise((ok, err) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => err(new Error('Não deu para carregar o leitor de arquivos. Verifique a internet.')); document.head.appendChild(el); });
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js', PDFJS_W = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const TESS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+async function textoDoArquivo(file, status){
+  const nome = (file.name || '').toLowerCase(), tipo = file.type || '';
+  if (tipo === 'application/pdf' || nome.endsWith('.pdf')) {
+    status('Lendo o PDF…'); await carregarScript(PDFJS); pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_W;
+    const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise; let out = '';
+    for (let p = 1; p <= Math.min(pdf.numPages, 30); p++) {
+      const pg = await pdf.getPage(p), tc = await pg.getTextContent(), linhas = new Map();
+      tc.items.forEach(it => { if (!it.str.trim()) return; const y = Math.round(it.transform[5] / 3); const l = linhas.get(y) || []; l.push([it.transform[4], it.str]); linhas.set(y, l); });
+      [...linhas.entries()].sort((a, b) => b[0] - a[0]).forEach(([, l]) => { out += l.sort((a, b) => a[0] - b[0]).map(x => x[1]).join('  ') + '\n'; });
+      out += '\n';
+    }
+    if (out.replace(/\s/g, '').length > 30) return out;
+    status('O PDF parece ser uma imagem. Lendo como foto…');
+    const pg = await pdf.getPage(1), vp = pg.getViewport({scale: 2}), cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+    await pg.render({canvasContext: cv.getContext('2d'), viewport: vp}).promise;
+    return lerFoto(cv, status);
+  }
+  if (tipo.startsWith('image/') || /\.(jpe?g|png|heic|webp)$/.test(nome)) return lerFoto(file, status);
+  status('Lendo o arquivo…'); return file.text();
+}
+async function lerFoto(img, status){
+  status('Lendo a foto (na primeira vez demora um pouco)…'); await carregarScript(TESS);
+  const r = await Tesseract.recognize(img, 'por', {logger: m => { if (m.status === 'recognizing text') status(`Lendo a foto… ${Math.round(m.progress * 100)}%`); }});
+  return r.data.text;
+}
+const DIAS_RE = [['domingo',0],['segunda',1],['terça',2],['terca',2],['quarta',3],['quinta',4],['sexta',5],['sábado',6],['sabado',6]];
+function interpretarTreino(txt){
+  const linhas = String(txt || '').replace(/\r/g, '').split('\n').map(l => l.replace(/[\t ]+/g, ' ').trim()).filter(Boolean);
+  const blocos = []; let atual = null;
+  const novo = (nome, dias) => { atual = {nome, dias, ex: [], descanso: 0}; blocos.push(atual); };
+  const reSeries = /(\d{1,2})\s*(?:x|×|X|\*)\s*(\d{1,3}(?:\s*(?:a|-|–|\/)\s*\d{1,3}(?!\s*kg|[.,]\d))?|falha|max|máx)/i;
+  const reSeries2 = /(\d{1,2})\s*s[ée]ries?\s*(?:de|x)?\s*(\d{1,3}(?:\s*(?:a|-|–|\/)\s*\d{1,3})?)\s*(?:repeti[çc][õo]es|reps?)\b/i;
+  for (const l0 of linhas) {
+    const l = l0.replace(/^[\d]{1,2}\s*[.)\-–]\s*/, '').replace(/^[•\-–*]\s*/, '');
+    const low = l.toLowerCase();
+    const desc = low.match(/descanso[^0-9]{0,12}(\d{1,3})\s*(s|seg|"|min|')?/);
+    if (desc && atual) { let v = +desc[1]; if (/min|'/.test(desc[2] || '') || v <= 5) v *= 60; atual.descanso = Math.max(atual.descanso, Math.min(300, v)); }
+    const ehCab = /^(treino|ficha|rotina|dia|divis[aã]o)\s*[a-z0-9]{0,3}\b/i.test(l) && !reSeries.test(l) && l.length < 60
+      || /^[A-E]\s*[-–:)]\s*\D{3,}$/.test(l) && l.length < 50
+      || DIAS_RE.some(([d]) => low.startsWith(d)) && !reSeries.test(l) && l.length < 60;
+    if (ehCab) { const dias = DIAS_RE.filter(([d]) => low.includes(d)).map(([, i]) => i); novo(l.replace(/[:\-–]\s*$/, '').trim(), [...new Set(dias)]); continue; }
+    let m = l.match(reSeries) || l.match(reSeries2), series, reps, nome;
+    if (m) { series = +m[1]; reps = m[2]; nome = l.replace(m[0], ''); }
+    else { const t = l.match(/^(.{3,}?[a-zà-ú)])\s+(\d{1,2})\s+(\d{1,3})(?:\s+(\d{1,3}(?:[.,]\d)?))?(?:\s|$)/i);
+      if (t && +t[2] <= 10 && +t[3] <= 60) { series = +t[2]; reps = t[3]; nome = t[1] + (t[4] ? ` ${t[4]}kg` : ''); } }
+    if (!series || series > 12) continue;
+    const kg = l.match(/(\d{1,3}(?:[.,]\d+)?)\s*kg/i);
+    nome = nome.replace(/(\d{1,3}(?:[.,]\d+)?)\s*kg/ig, '').replace(/descanso.*$/i, '').replace(/s[ée]ries?|repeti[çc][õo]es|reps?\b/ig, '').replace(/[|·•\-–:;,]+\s*$/,'').replace(/^\s*[|·•\-–:;,]+/,'').replace(/\s{2,}/g, ' ').trim();
+    if (!/[a-zà-ú]{3,}/i.test(nome)) continue;
+    if (!atual) novo('Treino importado', []);
+    const repsTxt = String(reps).replace(/\s+/g, '').replace(/[–\/]/g, '-');
+    atual.ex.push(`${nome[0].toUpperCase() + nome.slice(1)} ${series}x${/^\d/.test(repsTxt) ? repsTxt.split(/[-a]/)[0] : 12}${kg ? ' ' + kg[1] + 'kg' : ''}`);
+  }
+  return blocos.filter(b => b.ex.length);
+}
+let impBlocos = [];
+function sheetImportTreino(){
+  openSheet('Importar treino', `<div class="form">
+    <p class="small muted" style="margin:0">Envie a ficha do seu treino: <b>PDF</b>, <b>foto</b> da folha ou um <b>texto</b>. O app separa os treinos (A, B, C… ou dias da semana) e os exercícios com séries, repetições e carga. Você confere antes de salvar.</p>
+    <label class="btn pri wide" for="itArq">${ic('plus','s')}Escolher arquivo</label><input type="file" id="itArq" accept=".pdf,.txt,.csv,image/*,application/pdf,text/plain" hidden>
+    <details><summary class="small muted" style="cursor:pointer">Ou colar o texto do treino</summary><textarea class="inp" id="itTxt" rows="6" style="margin-top:8px" placeholder="Treino A - Peito e tríceps&#10;Supino reto 4x10 40kg&#10;Crucifixo 3x12&#10;&#10;Treino B - Costas&#10;Puxada frente 4x12 45kg"></textarea><button type="button" class="btn sec wide" style="margin-top:8px" data-act="itColar">Ler texto</button></details>
+    <span class="small muted" id="itStatus"></span>
+    <div id="itPrev" style="display:grid;gap:12px"></div>
+  </div>`);
+  const f = $('#itArq'), st = t => { const e = $('#itStatus'); if (e) e.textContent = t; };
+  f.addEventListener('change', async () => { const arq = f.files[0]; if (!arq) return;
+    try { const txt = await textoDoArquivo(arq, st); mostrarImport(txt); } catch(e) { st(e.message || 'Não deu para ler o arquivo.'); } f.value = ''; });
+}
+function mostrarImport(txt){
+  impBlocos = interpretarTreino(txt);
+  const st = $('#itStatus'), box = $('#itPrev'); if (!box) return;
+  if (!impBlocos.length) { st.textContent = 'Não encontrei exercícios com séries e repetições (ex.: "Supino 4x10"). Cole o texto e ajuste o formato, ou monte a rotina à mão.'; box.innerHTML = ''; if (!$('#itTxt').value) $('#itTxt').value = String(txt).slice(0, 4000); $('#sheetBody details').open = true; return; }
+  st.textContent = `Encontrei ${impBlocos.length} ${impBlocos.length === 1 ? 'treino' : 'treinos'} com ${impBlocos.reduce((a, b) => a + b.ex.length, 0)} exercícios. Confira e ajuste:`;
+  box.innerHTML = impBlocos.map((b, i) => `<div class="card it-bloco" style="box-shadow:none;display:grid;gap:10px">
+      <div class="switch"><input class="inp" id="itN${i}" value="${esc(b.nome)}" aria-label="Nome da rotina"><button type="button" class="sw on" id="itOn${i}" data-act="sw" role="switch" aria-checked="true" aria-label="Importar esta rotina"></button></div>
+      <div class="toggles" id="itD${i}">${[1,2,3,4,5,6,0].map(d => `<button type="button" class="${b.dias.includes(d) ? 'on' : ''}" data-act="tgl" data-v="${d}" aria-label="${DOW[d]}">${DOW1[d]}</button>`).join('')}</div>
+      <textarea class="inp" id="itE${i}" rows="${Math.min(12, b.ex.length + 1)}">${esc(b.ex.join('\n'))}</textarea>
+      <label class="small muted">Descanso <select class="inp" id="itR${i}" style="height:36px;display:inline-block;width:auto;margin-left:6px">${[30,45,60,75,90,120,150,180].map(v => opt(String(v), v < 60 ? v + ' s' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min', String(b.descanso && [30,45,60,75,90,120,150,180].includes(b.descanso) ? b.descanso : 60))).join('')}</select></label>
+    </div>`).join('') + `<button type="button" class="btn pri wide" data-act="itSalvar">Criar rotinas</button>`;
+  if (!RM.matches) box.animate([{opacity:0, transform:'translateY(8px)'}, {opacity:1, transform:'none'}], {duration: 360});
+}
+
 /* ================= animação ================= */
 const mem = new Map();
 function tween(el, prop, a, b){ el.style.transition = 'none'; el.style[prop] = a; el.getBoundingClientRect(); el.style.transition = ''; el.style[prop] = b; }
@@ -1188,13 +1275,13 @@ function corpoTreino(){
   </section>
   <section class="card rv"><h2>Treino de hoje</h2>
     ${rot.length ? rot.map(rotCard).join('<hr class="sep">')
-      : empty('dumbbell', 'Descanso hoje', S.treinos.rotinas.length ? 'Nenhuma rotina marcada para hoje. Quer treinar mesmo assim? Escolha abaixo.' : 'Monte suas rotinas com séries, repetições e carga.', S.treinos.rotinas.length ? '' : `<button class="btn pri" data-act="novaRotina">${ic('plus','s')}Nova rotina</button>`)}
+      : empty('dumbbell', 'Descanso hoje', S.treinos.rotinas.length ? 'Nenhuma rotina marcada para hoje. Quer treinar mesmo assim? Escolha abaixo.' : 'Monte suas rotinas com séries, repetições e carga.', S.treinos.rotinas.length ? '' : `<div class="btnrow"><button class="btn pri" data-act="novaRotina">${ic('plus','s')}Nova rotina</button><button class="btn sec" data-act="importTreino">Importar arquivo</button></div>`)}
     ${outras.length ? `<div class="field" style="margin-top:14px"><label>${rot.length ? 'Ou treinar outra rotina' : 'Treinar uma rotina'}</label><div class="chips" style="flex-wrap:wrap">${outras.map(r => `<button class="chip" data-act="iniciarTreino" data-id="${r.id}">${ic('dumbbell','s')} ${esc(r.nome)}</button>`).join('')}</div></div>` : ''}
   </section>
   <section class="grid2"><div class="card kpi rv"><span class="lbl">Treinos em 30 dias</span><span class="val num" data-count="${n30}" data-k="t30">0</span></div>
     <div class="card kpi rv"><span class="lbl">Gasto em 7 dias</span><span class="val num"><span data-count="${kcal7}" data-k="tk7">0</span><small>kcal</small></span></div></section>
   ${hist.length ? `<section class="card rv"><h2>Últimos treinos</h2><div class="list">${hist.map(f => `<div class="row"><div class="grow"><div class="t">${esc(f.nome || 'Treino')}</div><div class="s num">${parseD(f.data).toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'})} · ${mmss(f.duracao * 1000)} · ${f.series} séries${f.volume ? ' · ' + fmt(f.volume) + ' kg' : ''}</div></div><b class="num">${fmt(f.kcal)}</b><span class="small muted">kcal</span><button class="round ghost" data-act="delTreinoFeito" data-v="${f.inicio}" aria-label="Apagar registro">${ic('trash','s')}</button></div>`).join('')}</div></section>` : ''}
-  ${S.treinos.rotinas.length ? `<section class="card rv"><h2>Rotinas</h2><div class="list">${S.treinos.rotinas.map(r => `<button class="row rowbtn" data-act="editRotina" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${(r.dias||[]).length ? [...r.dias].sort((a,b) => ((a+6)%7) - ((b+6)%7)).map(i => DOW[i]).join(', ') : 'Sem dia fixo'} · ${(r.exercicios||[]).length} exercícios · descanso ${r.descanso || 60} s</div></div>${ic('chev','s chev')}</button>`).join('')}</div></section>` : ''}`;
+  ${S.treinos.rotinas.length ? `<section class="card rv"><div class="sec-row"><h2>Rotinas</h2><button class="link small" data-act="importTreino">Importar de arquivo</button></div><div class="list">${S.treinos.rotinas.map(r => `<button class="row rowbtn" data-act="editRotina" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${(r.dias||[]).length ? [...r.dias].sort((a,b) => ((a+6)%7) - ((b+6)%7)).map(i => DOW[i]).join(', ') : 'Sem dia fixo'} · ${(r.exercicios||[]).length} exercícios · descanso ${r.descanso || 60} s</div></div>${ic('chev','s chev')}</button>`).join('')}</div></section>` : ''}`;
 }
 function corpoAlim(){
   const t = today(), sd = somaDia(t), m = S.alimentacao.metas;
@@ -1933,6 +2020,16 @@ const ACT = {
   pesoPer: el => { ui.pesoPeriodo = +el.dataset.v; render(false); },
   delPeso: el => { if (!confirm(`Apagar o peso de ${ddmm(el.dataset.v)}?`)) return; S.peso.items = S.peso.items.filter(p => p.data !== el.dataset.v); save('peso'); render(false); toast('Registro apagado'); },
   novaRotina: () => sheetRotina(null),
+  importTreino: () => sheetImportTreino(),
+  itColar: () => { const t = $('#itTxt').value.trim(); if (!t) return toast('Cole o texto do treino.', true); mostrarImport(t); },
+  itSalvar: () => {
+    let n = 0;
+    impBlocos.forEach((b, i) => { if (!$('#itOn' + i).classList.contains('on')) return;
+      const ex = val('itE' + i).split('\n').map(x => x.trim()).filter(Boolean); if (!ex.length) return;
+      S.treinos.rotinas.push({id: uid(), nome: val('itN' + i) || b.nome, dias: [...document.querySelectorAll('#itD' + i + ' .on')].map(x => +x.dataset.v), exercicios: ex, descanso: +val('itR' + i) || 60}); n++; });
+    if (!n) return toast('Nenhuma rotina marcada para importar.', true);
+    save('treinos'); closeSheet(); render(false); toast(`${n} ${n === 1 ? 'rotina criada' : 'rotinas criadas'}`);
+  },
   editRotina: el => sheetRotina(find(S.treinos.rotinas, el.dataset.id)),
   delRotina: el => { S.treinos.rotinas = S.treinos.rotinas.filter(r => r.id !== el.dataset.id); save('treinos'); closeSheet(); render(false); toast('Rotina excluída'); },
   novaRefeicao: () => sheetRefeicao(),
