@@ -375,21 +375,28 @@ body.em-treino{overflow:hidden}
 .ts-rest .trk{stroke:var(--surface2)}
 .ts-rest-c{position:absolute;top:18px;width:210px;height:210px;display:grid;place-content:center;justify-items:center;text-align:center;gap:2px;padding:0 30px}
 .ts-rest-c b{font-size:46px;letter-spacing:-.03em;line-height:1}
-.ts-list{display:grid;gap:12px}
-.ts-ex{background:var(--surface);border-radius:var(--r-lg);padding:14px 16px;box-shadow:var(--shadow);display:grid;gap:10px;transition:opacity .3s,box-shadow .3s,transform .3s}
+.ts-list{display:grid;gap:16px}
+.ts-ex{background:var(--surface);border-radius:var(--r-lg);padding:20px 18px;box-shadow:var(--shadow);display:grid;gap:14px;transition:opacity .3s,box-shadow .3s,transform .3s}
 .ts-ex.atual{box-shadow:0 0 0 2px var(--accent),var(--shadow-up)}
 .ts-ex.ok{opacity:.6}
-.ts-ex-h{display:flex;align-items:center;gap:10px}
-.ts-ex-h b{flex:1;min-width:0;font-size:17px}
-.ts-n{width:28px;height:28px;border-radius:50%;background:var(--surface2);display:grid;place-items:center;font-weight:700;font-size:14px;flex:none}
+.ts-ex-h{display:flex;align-items:center;gap:12px}
+.ts-ex-h b{flex:1;min-width:0;font-size:21px;line-height:1.2;letter-spacing:-.01em}
+.ts-n{width:36px;height:36px;border-radius:50%;background:var(--surface2);display:grid;place-items:center;font-weight:700;font-size:17px;flex:none}
 .ts-ex.ok .ts-n{background:var(--ok);color:#fff}
-.ts-sets{display:grid;gap:8px}
-.ts-set{display:grid;grid-template-columns:62px minmax(0,1fr) minmax(0,1fr) 34px;gap:8px;align-items:center;padding:6px 8px;border-radius:12px;transition:background .3s}
+.ts-sets{display:grid;gap:10px}
+.ts-set{display:grid;grid-template-columns:68px minmax(0,1fr) minmax(0,1fr) 44px;gap:8px;align-items:center;padding:8px;border-radius:14px;transition:background .3s}
 .ts-set.prox{background:var(--accent-soft)}
 .ts-set.feita{opacity:.65}
-.ts-set label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--fg2);min-width:0}
-.ts-set .inp{height:38px;padding:0 8px;text-align:center;font-size:16px}
-.ts-set .check{width:32px;height:32px}
+.ts-set label{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--fg2);min-width:0}
+.ts-set .inp{height:50px;padding:0 6px;text-align:center;font-size:20px;font-weight:600}
+.ts-set .check{width:44px;height:44px}
+.ts-ex .bx-mini{flex-direction:column;gap:8px;text-align:center}
+.ts-ex .bx-mini img{width:min(100%,230px);height:auto;aspect-ratio:1;border-radius:18px}
+.ts-ex .bx-mini span{display:block;font-size:16px;padding:6px 12px}
+#bx .bx-item{min-height:104px;gap:14px}
+#bx .bx-item img{width:88px;height:88px;border-radius:14px}
+#bx .bx-item b{font-size:17px}
+#bx .bx-item span{font-size:14px}
 .ts-fim{display:grid;gap:10px;justify-items:center;text-align:center;padding:16px;background:var(--ok-soft);border-radius:var(--r-lg)}
 .ts-resumo{justify-items:center;text-align:center;padding-top:28px}
 .ts-resumo h2{margin:0;font-size:28px;letter-spacing:-.02em}
@@ -404,7 +411,7 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:16px 0}
 .ativo-treino{width:100%;text-align:left;background:var(--ok-soft);animation:pulse 2s ease-in-out infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 4px var(--ok-soft)}}
 .wd[disabled]{opacity:.45;cursor:default}
-@media (max-width:360px){.ts-set{grid-template-columns:54px minmax(0,1fr) minmax(0,1fr) 32px;gap:6px}.ts-num b{font-size:24px}}
+@media (max-width:360px){.ts-set{grid-template-columns:52px minmax(0,1fr) minmax(0,1fr) 44px;gap:5px;padding:8px 2px}.ts-set label{font-size:12px;gap:3px}.ts-set .inp{font-size:17px;padding:0 2px;height:48px}.ts-ex{padding:18px 12px}.ts-num b{font-size:24px}}
 
 .fech-atalho{display:flex;align-items:center;gap:12px;text-align:left;width:100%;padding:14px 16px}
 .fech-atalho > svg:first-child{color:var(--ok)}
@@ -414,5 +421,5 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:16px 0}
 .ts-notas{background:var(--surface2);border-radius:12px;padding:10px 12px}
 .ts-notas summary{cursor:pointer;font-size:14px;font-weight:600;color:var(--fg2)}
 .ts-notas p{margin:8px 0 0;font-size:14px;line-height:1.5;color:var(--fg)}
-.ts-tempo .ts-set{grid-template-columns:62px minmax(0,1fr) auto 34px}
+.ts-tempo .ts-set{grid-template-columns:68px minmax(0,1fr) auto 44px}
 .ts-tempo .mini{display:inline-flex;align-items:center;gap:4px}
