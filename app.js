@@ -493,11 +493,12 @@ function bip(){
 function abrirSessao(){
   let w = $('#treinoWrap');
   if (!w) { w = document.createElement('div'); w.id = 'treinoWrap'; w.setAttribute('role', 'dialog'); w.setAttribute('aria-label', 'Treino em andamento'); document.body.appendChild(w); }
-  w.hidden = false; document.body.classList.add('em-treino'); pedirTelaLigada();
+  w.hidden = false; document.body.classList.add('em-treino'); pedirTelaLigada(); carregarBiblioteca();
   if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   renderSessao(true);
   clearInterval(sessTick); sessTick = setInterval(tickSessao, 250);
 }
+function carregarBiblioteca(){ if (window.Biblioteca && !Biblioteca.pronta()) Biblioteca.carregar().then(ok => { const a = document.activeElement; if (ok && sessao && !$('#treinoWrap')?.hidden && !(a && /INPUT|SELECT|TEXTAREA/.test(a.tagName))) renderSessao(); }); }
 function fecharSessao(){ clearInterval(sessTick); soltarTela(); const w = $('#treinoWrap'); if (w) { w.classList.add('saindo'); setTimeout(() => { w.hidden = true; w.classList.remove('saindo'); w.innerHTML = ''; }, RM.matches ? 0 : 320); } document.body.classList.remove('em-treino'); }
 function tickSessao(){
   if (!sessao) return;
@@ -539,6 +540,7 @@ function renderSessao(entrando){
       <div class="btnrow ts-rest-b"><button class="mini" data-act="tsMais">+15 s</button><button class="mini" data-act="tsPular">Pular descanso</button></div></section>` : ''}
     <section class="ts-list">${x.exs.map((e, i) => { const ok = e.series.every(z => z.feita), atual = pend && pend[0] === i;
       return `<div class="ts-ex${ok ? ' ok' : ''}${atual ? ' atual' : ''}" id="tsEx${i}"><div class="ts-ex-h"><span class="ts-n num">${ok ? ic('check','s') : i + 1}</span><b>${esc(e.nome)}${e.faixa || e.descanso ? `<span class="small muted" style="display:block;font-weight:500">${[e.faixa && 'meta ' + e.faixa + ' rep', e.descanso && 'descanso ' + e.descanso + ' s'].filter(Boolean).join(' · ')}</span>` : ''}</b><span class="small muted num">${e.series.filter(z => z.feita).length}/${e.series.length}</span></div>
+        ${e.tipo !== 'tempo' && window.Biblioteca ? Biblioteca.miniHTML(e.nome, `data-act="tsComoFazer" data-v="${i}"`) : ''}
         ${e.tipo === 'tempo' ? (z => `<div class="ts-tempo"><div class="ts-set${z.feita ? ' feita' : ''}"><span class="small muted">Duração</span>
             <label><input class="inp num" type="number" inputmode="numeric" min="1" value="${z.reps}" data-tsk="${i}.0.reps" aria-label="Minutos"><span>min</span></label>
             ${z.feita ? '<span class="small up" style="font-weight:600">feita</span>' : e.cronoAte ? `<b class="num" id="tsCr${i}">${mmss(e.cronoAte - agoraMs())}</b>` : `<button class="mini" data-act="tsCrono" data-v="${i}">${ic('clock','s')}Iniciar</button>`}
@@ -548,7 +550,7 @@ function renderSessao(entrando){
           <label><input class="inp num" type="number" inputmode="decimal" min="0" step="0.5" value="${z.kg || ''}" placeholder="kg" data-tsk="${i}.${j}.kg" aria-label="Carga em kg"><span>kg</span></label>
           <label><input class="inp num" type="number" inputmode="numeric" min="0" value="${z.reps}" data-tsk="${i}.${j}.reps" aria-label="Repetições"><span>rep</span></label>
           <button class="check${z.feita ? ' on' : ''}" data-act="tsSerie" data-v="${i}.${j}" aria-label="Concluir série ${j + 1} de ${esc(e.nome)}"><svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></button></div>`).join('')}
-          <div class="btnrow" style="gap:6px"><button class="link small" data-act="tsAddSerie" data-v="${i}">+ série</button>${e.series.length > 1 ? `<button class="link small" data-act="tsRemSerie" data-v="${i}" style="color:var(--fg2)">− série</button>` : ''}<button class="link small" data-act="tsTrocar" data-v="${i}" style="margin-left:auto">Trocar exercício</button></div></div>`}</div>`; }).join('')}
+          <div class="btnrow" style="gap:6px"><button class="link small" data-act="tsAddSerie" data-v="${i}">+ série</button>${e.series.length > 1 ? `<button class="link small" data-act="tsRemSerie" data-v="${i}" style="color:var(--fg2)">− série</button>` : ''}<button class="link small" data-act="tsTrocarBib" data-v="${i}" style="margin-left:auto">Biblioteca</button><button class="link small" data-act="tsTrocar" data-v="${i}">Trocar exercício</button></div></div>`}</div>`; }).join('')}
       ${!pend ? `<div class="ts-fim"><b>Todas as séries concluídas</b><button class="btn pri wide" data-act="tsFinalizar">Finalizar treino</button></div>` : ''}</section>
   </div>`;
   w.querySelectorAll('[data-tsk]').forEach(inp => inp.addEventListener('input', () => { const [i, j, k] = inp.dataset.tsk.split('.'); sessao.exs[+i].series[+j][k] = Math.max(0, parseFloat(inp.value.replace(',', '.')) || 0); salvarSessao(); }));
@@ -589,6 +591,10 @@ const ACT_TREINO = {
   },
   tsCrono: el => { const e = sessao.exs[+el.dataset.v]; e.cronoMs = (+e.series[0].reps || e.min || 20) * 60000; e.cronoAte = agoraMs() + e.cronoMs; sessao.descansoAte = null; if (sessao.pausadoEm) { sessao.pausaTotal += agoraMs() - sessao.pausadoEm; sessao.pausadoEm = null; } salvarSessao(); renderSessao(); },
   tsCronoStop: el => { const e = sessao.exs[+el.dataset.v], feito = Math.max(0, (e.cronoMs || 0) - Math.max(0, e.cronoAte - agoraMs())); e.series[0].reps = Math.max(1, Math.round(feito / 60000)); e.series[0].feita = true; e.cronoAte = null; salvarSessao(); renderSessao(); toast(`${e.nome}: ${e.series[0].reps} min registrados`); },
+  tsComoFazer: el => { const e = sessao.exs[+el.dataset.v]; Biblioteca.verPorNome(e.nome, () => renderSessao()); },
+  tsTrocarBib: el => { const e = sessao.exs[+el.dataset.v]; Biblioteca.abrir({busca: e.nome, aoEscolher: nome => { if (nome !== e.nome) { e.trocadoDe = e.trocadoDe || e.nome; e.nome = nome; salvarSessao(); toast('Exercício trocado neste treino'); } renderSessao(); }}); },
+  bxAbrir: () => Biblioteca.abrir(),
+  rotBib: () => Biblioteca.abrir({aoEscolher: nome => { const t = $('#rEx'); if (t) { t.value = (t.value.trim() ? t.value.trim() + '\n' : '') + nome + ' 3x12'; } }}),
   tsTrocar: el => { const i = +el.dataset.v, e = sessao.exs[i], h = $('#tsEx' + i).querySelector('.ts-ex-h b'); if (!h || h.querySelector('input')) return;
     h.innerHTML = `<input class="inp" id="tsNovoNome" value="${esc(e.nome)}" style="height:38px" aria-label="Novo exercício"><span class="small muted" style="display:block;font-weight:500;margin-top:4px">Troca só neste treino. Toque fora para confirmar.</span>`;
     const inp = $('#tsNovoNome'); inp.focus(); inp.select();
@@ -1399,6 +1405,7 @@ function corpoTreino(){
     <div class="card kpi rv"><span class="lbl">Gasto em 7 dias</span><span class="val num"><span data-count="${kcal7}" data-k="tk7">0</span><small>kcal</small></span></div></section>
   ${hist.length ? `<section class="card rv"><h2>Últimos treinos</h2><div class="list">${hist.map(f => `<div class="row"><div class="grow"><div class="t">${esc(f.nome || 'Treino')}</div><div class="s num">${parseD(f.data).toLocaleDateString('pt-BR', {weekday:'short', day:'2-digit', month:'short'})} · ${mmss(f.duracao * 1000)} · ${f.series} séries${f.volume ? ' · ' + fmt(f.volume) + ' kg' : ''}</div></div><b class="num">${fmt(f.kcal)}</b><span class="small muted">kcal</span><button class="round ghost" data-act="delTreinoFeito" data-v="${f.inicio}" aria-label="Apagar registro">${ic('trash','s')}</button></div>`).join('')}</div></section>` : ''}
   ${S.treinos.orientacoes ? `<section class="card rv"><details class="ts-notas"><summary><b>Orientações do plano</b></summary><p>${esc(S.treinos.orientacoes).replace(/\n/g, '<br>')}</p></details><button class="link small" data-act="editOrient" style="margin-top:6px">Editar</button></section>` : ''}
+  <button class="card rv row rowbtn" data-act="bxAbrir" style="width:100%;text-align:left"><div class="grow"><div class="t">Biblioteca de exercícios</div><div class="s">1.324 exercícios com GIF e passo a passo</div></div>${ic('chev','s chev')}</button>
   ${S.treinos.rotinas.length ? `<section class="card rv"><div class="sec-row"><h2>Rotinas</h2><button class="link small" data-act="importTreino">Importar de arquivo</button></div><div class="list">${S.treinos.rotinas.map(r => `<button class="row rowbtn" data-act="editRotina" data-id="${r.id}"><div class="grow"><div class="t">${esc(r.nome)}</div><div class="s">${(r.dias||[]).length ? [...r.dias].sort((a,b) => ((a+6)%7) - ((b+6)%7)).map(i => DOW[i]).join(', ') : 'Sem dia fixo'} · ${(r.exercicios||[]).length} exercícios · descanso ${r.descanso || 60} s</div></div>${ic('chev','s chev')}</button>`).join('')}</div></section>` : ''}`;
 }
 function corpoAlim(){
@@ -1842,7 +1849,7 @@ function sheetRotina(r){
   openSheet(novo ? 'Nova rotina' : 'Editar rotina', `<form class="form" data-form="rotina" data-id="${r.id || ''}">
     <div class="field"><label for="rNome">Nome</label><input class="inp" id="rNome" value="${esc(r.nome)}" placeholder="Treino A · Peito e tríceps" required autofocus></div>
     <div class="field"><label>Dias da semana</label><div class="toggles" id="rDias">${[1,2,3,4,5,6,0].map(i => `<button type="button" class="${(r.dias||[]).includes(i) ? 'on' : ''}" data-act="tgl" data-v="${i}" aria-label="${DOW[i]}">${DOW1[i]}</button>`).join('')}</div></div>
-    <div class="field"><label for="rEx">Exercícios (um por linha: nome, séries x repetições e carga)</label><textarea class="inp" id="rEx" rows="8" placeholder="Supino reto 4x10 40kg&#10;Crucifixo 3x12 14kg&#10;Tríceps corda 3x15 25kg&#10;Prancha 3x45">${esc((r.exercicios||[]).join('\n'))}</textarea><span class="small muted">Sem séries informadas, o app usa 3x12. A carga é opcional.</span></div>
+    <div class="field"><label for="rEx">Exercícios (um por linha: nome, séries x repetições e carga)</label><textarea class="inp" id="rEx" rows="8" placeholder="Supino reto 4x10 40kg&#10;Crucifixo 3x12 14kg&#10;Tríceps corda 3x15 25kg&#10;Prancha 3x45">${esc((r.exercicios||[]).join('\n'))}</textarea><span class="small muted">Sem séries informadas, o app usa 3x12. A carga é opcional.</span><button type="button" class="link small" data-act="rotBib" style="justify-self:start;margin-top:4px">Adicionar da biblioteca</button></div>
     <div class="field"><label for="rNotas">Orientações (opcional)</label><textarea class="inp" id="rNotas" rows="3" placeholder="Ex.: manter 1–3 repetições em reserva">${esc(r.notas || '')}</textarea></div>
     <div class="field"><label for="rDesc">Descanso entre séries</label><select class="inp" id="rDesc">${[30,45,60,75,90,120,150,180].map(v => opt(String(v), v < 60 ? v + ' segundos' : (v / 60 | 0) + (v % 60 ? ':' + pad(v % 60) : '') + ' min', String(r.descanso || 60))).join('')}</select></div>
     <button class="btn pri wide">Salvar rotina</button>
