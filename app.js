@@ -1139,8 +1139,16 @@ function vgv(lista){
   return {previsto: soma(lista.filter(c => ATIVAS.includes(c.etapa))), semValor: lista.filter(c => ATIVAS.includes(c.etapa) && !c.valor).length,
     mes: soma(vendas.filter(c => dataVenda(c).slice(0,7) === mes)), ano: soma(vendas.filter(c => dataVenda(c).slice(0,4) === ano)), nMes: vendas.filter(c => dataVenda(c).slice(0,7) === mes).length};
 }
+// Comissão prevista: a mesma regra das vendas, aplicada aos clientes em andamento que já têm valor.
+function comissaoPrevista(lista){
+  const r = {venda: 0, coord: 0, total: 0, n: 0, semPct: new Set()};
+  lista.filter(c => ATIVAS.includes(c.etapa) && +c.valor).forEach(c => { const x = comissaoVenda(c); r.venda += x.venda; r.coord += x.coord; r.total += x.total; if (x.total) r.n++; if (x.semPct) r.semPct.add(P(c.produtoId).nome); });
+  r.semPct = [...r.semPct]; return r;
+}
+const brlCent = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
 function cardVGV(){
   if (!S.clientes.length) return '';
+  const cp = comissaoPrevista(CLI());
   const v = vgv(S.clientes), mesNome = new Date().toLocaleDateString('pt-BR', {month:'long'});
   const porCor = S.corretores.map(b => ({b, ...vgv(S.clientes.filter(c => c.corretorId === b.id))})).filter(r => r.previsto || r.mes).sort((a, b) => (b.previsto + b.mes) - (a.previsto + a.mes));
   const max = Math.max(1, ...porCor.map(r => Math.max(r.previsto, r.mes)));
@@ -1149,6 +1157,7 @@ function cardVGV(){
       <div class="kpi"><span class="lbl">Previsto em andamento</span><span class="val num vgv" data-count="${Math.round(v.previsto)}" data-k="vgvp" data-brl="1">${brlCurto(v.previsto)}</span><span class="delta flat">${v.semValor ? v.semValor + ' clientes sem valor' : 'Todos com valor'}</span></div>
       <div class="kpi"><span class="lbl">Efetuado em ${mesNome}</span><span class="val num vgv up" data-count="${Math.round(v.mes)}" data-k="vgvm" data-brl="1">${brlCurto(v.mes)}</span><span class="delta flat">${v.nMes} ${v.nMes === 1 ? 'venda' : 'vendas'} · ano ${brlCurto(v.ano)}</span></div>
     </div>
+    ${cp.total || cp.semPct.length ? `<button class="row rowbtn" data-act="fechamentos" style="margin-top:12px;width:100%"><span class="grow"><span class="t">Comissão prevista</span><span class="s">${cp.n} ${cp.n === 1 ? 'negócio' : 'negócios'} em andamento · venda ${brl(cp.venda)} · coord. ${brl(cp.coord)}${cp.semPct.length ? ' · <span class="down">falta % em ' + cp.semPct.length + (cp.semPct.length === 1 ? ' produto' : ' produtos') + '</span>' : ''}</span></span><b class="num up">${brlCent(cp.total)}</b></button>` : ''}
     ${porCor.length ? `<div class="funnel" style="margin-top:16px">${porCor.map((r, j) => `<button class="fstage vg" data-act="goclientes" data-v="${r.b.id}" style="--j:${j}"><span class="nm">${esc(r.b.nome)}</span>
       <span class="tr2"><span class="tr"><i style="transform:scaleX(0)" data-bar="${r.previsto / max}" data-k="vp${r.b.id}"></i></span><span class="tr"><i style="background:var(--ok);transform:scaleX(0)" data-bar="${r.mes / max}" data-k="vm${r.b.id}"></i></span></span>
       <span class="ct num small">${brlCurto(r.previsto)}<br><span class="up">${brlCurto(r.mes)}</span></span></button>`).join('')}</div>
@@ -1203,6 +1212,12 @@ function sheetFechamentos(ym){
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span><span class="s">40% do percentual do empreendimento</span></span><b class="num">${brlC(comV)}</b></div>
       <div class="row"><span class="grow"><span class="t">Coordenação</span><span class="s">0,2% do VGV dos seus empreendimentos</span></span><b class="num">${brlC(comC)}</b></div></div>
       ${semPct.length ? `<p class="small down" style="margin:8px 0 0">Falta o % de comissão em: ${semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}</div>
+    ${(cp => cp.total || cp.semPct.length ? `<div class="card"><div class="sec-row"><h2 style="margin:0">Comissão prevista</h2><b class="num" style="font-size:22px">${brlC(cp.total)}</b></div>
+      <p class="small muted" style="margin:6px 0 0">Clientes em andamento no funil, com valor preenchido · ${cp.n} ${cp.n === 1 ? 'negócio' : 'negócios'}</p>
+      <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span></span><b class="num">${brlC(cp.venda)}</b></div>
+      <div class="row"><span class="grow"><span class="t">Coordenação</span></span><b class="num">${brlC(cp.coord)}</b></div>
+      ${(() => { const fim = comissaoPrevista(CLI().filter(c => ['Crédito aprovado','Proposta','Documentação','Contrato emitido'].includes(c.etapa))); return fim.total ? `<div class="row"><span class="grow"><span class="t">Na reta final</span><span class="s">Crédito aprovado, proposta, documentação e contrato</span></span><b class="num up">${brlC(fim.total)}</b></div>` : ''; })()}</div>
+      ${cp.semPct.length ? `<p class="small down" style="margin:8px 0 0">Sem % de comissão: ${cp.semPct.map(esc).join(', ')}.</p>` : ''}</div>` : '')(comissaoPrevista(CLI()))}
     <div class="card"><h2>Últimos 12 meses</h2><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="VGV fechado por mês">
       ${meses.map((m, i) => { const h = Math.max(porMes[i] ? 3 : 0, base * porMes[i] / maxM), x = gap + i * (bw + gap), sel = m === ym;
         return `<g class="fech-bar" data-act="fechMes" data-v="${m}" style="cursor:pointer"><rect x="${x - gap / 2}" y="0" width="${bw + gap}" height="${H}" fill="transparent"/><rect class="vb${sel ? ' today' : ''}" x="${x}" y="${base - h}" width="${bw}" height="${Math.max(h, .5)}" rx="5" style="--j:${i};transform:scaleY(0);${sel ? '' : 'opacity:.45'}" data-vbar="1" data-k="fm${m}${porMes[i]}"/>
