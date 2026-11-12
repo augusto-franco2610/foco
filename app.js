@@ -1199,7 +1199,9 @@ function sheetFechamentos(ym){
   const dif = ant ? (total - ant) / ant : null;
   const coms = doMes.map(comissaoVenda), comV = coms.reduce((a, x) => a + x.venda, 0), comC = coms.reduce((a, x) => a + x.coord, 0), comT = comV + comC;
   const semPct = [...new Set(doMes.filter((c, i) => coms[i].semPct).map(c => P(c.produtoId).nome))];
-  const comAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).reduce((a, c) => a + comissaoVenda(c).total, 0);
+  const cAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).map(comissaoVenda), comAno = cAno.reduce((a, x) => a + x.total, 0);
+  const comAnoV = cAno.reduce((a, x) => a + x.venda, 0), comAnoC = cAno.reduce((a, x) => a + x.coord, 0);
+  const prevAno = ano === today().slice(0, 4) ? comissaoPrevista(CLI()) : null;
   const brlC = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
   const W = 340, H = 150, base = 116, bw = 20, gap = (W - 12 * bw) / 13;
   openSheet('Fechamentos', `<div class="form fech">
@@ -1226,7 +1228,11 @@ function sheetFechamentos(ym){
     ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
     <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => x.total ? `<span class="small up num">${x.venda && x.coord ? 'venda + coord. ' : x.coord ? 'coord. ' : ''}${brlC(x.total)}</span>` : x.semPct ? '<span class="small down">sem % no produto</span>' : '')(coms[i])}</span></button>`).join('')}</div></div>`
       : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
-    <div class="card kpi"><span class="lbl">Total de ${ano}</span><span class="val num">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'} · comissão ${brlC(comAno)}</span></div>
+    <div class="card"><h2>Total de ${ano}</h2>
+      <div class="grid2"><div class="kpi"><span class="lbl">VGV fechado</span><span class="val num" style="font-size:24px;white-space:nowrap">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
+        <div class="kpi"><span class="lbl">Comissão</span><span class="val num up" style="font-size:24px;white-space:nowrap">${brl(comAno)}</span><span class="delta flat">venda ${brl(comAnoV)} · coord. ${brl(comAnoC)}</span></div></div>
+      ${prevAno && prevAno.total ? `<div class="list" style="margin-top:10px"><div class="row"><span class="grow"><span class="t">Comissão prevista</span><span class="s">${prevAno.n} ${prevAno.n === 1 ? 'negócio' : 'negócios'} em andamento</span></span><b class="num">${brlC(prevAno.total)}</b></div>
+        <div class="row"><span class="grow"><span class="t">Fechada + prevista</span></span><b class="num up">${brlC(comAno + prevAno.total)}</b></div></div>` : ''}</div>
   </div>`);
   animate($('#sheetBody'));
 }
