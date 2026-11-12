@@ -1167,6 +1167,13 @@ function somaMesesData(data, n){
 const REPETICOES = {1: 13, 7: 11, 14: 5, 30: 5}; // repetir a cada N dias → quantas cópias criar
 const somaMes = (ym, n) => { const [y, m] = ym.split('-').map(Number), d = new Date(y, m - 1 + n, 1); return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
 const vendas = () => CLI().filter(c => c.etapa === 'Venda');
+// Comissão do dono do app numa venda: venda própria = 40% do % que a incorporadora paga; produto da coordenação = 0,2% do VGV.
+const PCT_VENDA = 0.4, PCT_COORD = 0.002;
+function comissaoVenda(c){
+  const v = +c.valor || 0, p = P(c.produtoId), minha = !c._recebido && (c.corretorId || 'eu') === 'eu';
+  const venda = minha && p.comissao ? v * p.comissao / 100 * PCT_VENDA : 0, coord = p.coord ? v * PCT_COORD : 0;
+  return {venda, coord, total: venda + coord, minha, semPct: minha && !p.comissao, semValor: (minha || p.coord) && !v};
+}
 function sheetFechamentos(ym){
   ym = ym || ui.fechMes || today().slice(0, 7); ui.fechMes = ym;
   const todas = vendas(), doMes = todas.filter(c => dataVenda(c).slice(0, 7) === ym).sort((a, b) => dataVenda(b).localeCompare(dataVenda(a)));
@@ -1181,6 +1188,10 @@ function sheetFechamentos(ym){
   const porCor = agrupar(c => c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome), porProd = agrupar(c => P(c.produtoId).nome);
   const barras = (lista) => { const mx = Math.max(1, ...lista.map(([, x]) => x.v || x.n)); return `<div class="funnel">${lista.map(([k, x], j) => `<div class="fstage" style="--j:${j};grid-template-columns:110px 1fr auto"><span class="nm">${esc(k)}</span><span class="tr"><i style="transform:scaleX(0)" data-bar="${(x.v || x.n) / mx}" data-k="fx${ym}${j}${esc(k)}"></i></span><span class="ct num small" style="text-align:right">${x.n} · ${brlCurto(x.v)}</span></div>`).join('')}</div>`; };
   const dif = ant ? (total - ant) / ant : null;
+  const coms = doMes.map(comissaoVenda), comV = coms.reduce((a, x) => a + x.venda, 0), comC = coms.reduce((a, x) => a + x.coord, 0), comT = comV + comC;
+  const semPct = [...new Set(doMes.filter((c, i) => coms[i].semPct).map(c => P(c.produtoId).nome))];
+  const comAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).reduce((a, c) => a + comissaoVenda(c).total, 0);
+  const brlC = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
   const W = 340, H = 150, base = 116, bw = 20, gap = (W - 12 * bw) / 13;
   openSheet('Fechamentos', `<div class="form fech">
     <div class="sec-row"><button type="button" class="round ghost" data-act="fechMes" data-v="${somaMes(ym, -1)}" aria-label="Mês anterior">${ic('left','s')}</button>
@@ -1188,15 +1199,19 @@ function sheetFechamentos(ym){
       <button type="button" class="round ghost" data-act="fechMes" data-v="${somaMes(ym, 1)}" aria-label="Próximo mês" ${ym >= today().slice(0, 7) ? 'disabled style="opacity:.35"' : ''}>${ic('chev','s')}</button></div>
     <div class="grid2"><div class="card kpi"><span class="lbl">VGV fechado</span><span class="val num up" style="font-size:26px">${brlCurto(total)}</span><span class="delta ${dif == null ? 'flat' : dif >= 0 ? 'up' : 'down'}">${dif == null ? (ant === 0 && total ? 'mês anterior sem vendas' : '—') : (dif >= 0 ? '+' : '') + fmt(dif * 100) + '% vs. mês anterior'}</span></div>
       <div class="card kpi"><span class="lbl">Vendas</span><span class="val num">${doMes.length}</span><span class="delta flat">ticket médio ${brlCurto(ticket)}</span></div></div>
+    <div class="card"><div class="sec-row"><h2 style="margin:0">Sua comissão</h2><b class="num up" style="font-size:22px">${brlC(comT)}</b></div>
+      <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span><span class="s">40% do percentual do empreendimento</span></span><b class="num">${brlC(comV)}</b></div>
+      <div class="row"><span class="grow"><span class="t">Coordenação</span><span class="s">0,2% do VGV dos seus empreendimentos</span></span><b class="num">${brlC(comC)}</b></div></div>
+      ${semPct.length ? `<p class="small down" style="margin:8px 0 0">Falta o % de comissão em: ${semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}</div>
     <div class="card"><h2>Últimos 12 meses</h2><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="VGV fechado por mês">
       ${meses.map((m, i) => { const h = Math.max(porMes[i] ? 3 : 0, base * porMes[i] / maxM), x = gap + i * (bw + gap), sel = m === ym;
         return `<g class="fech-bar" data-act="fechMes" data-v="${m}" style="cursor:pointer"><rect x="${x - gap / 2}" y="0" width="${bw + gap}" height="${H}" fill="transparent"/><rect class="vb${sel ? ' today' : ''}" x="${x}" y="${base - h}" width="${bw}" height="${Math.max(h, .5)}" rx="5" style="--j:${i};transform:scaleY(0);${sel ? '' : 'opacity:.45'}" data-vbar="1" data-k="fm${m}${porMes[i]}"/>
           ${nPorMes[i] ? `<text x="${x + bw / 2}" y="${base - h - 5}" text-anchor="middle" style="font-size:10px">${nPorMes[i]}</text>` : ''}<text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" style="${sel ? 'fill:var(--fg);font-weight:700' : ''}">${MES[+m.slice(5) - 1].slice(0, 1).toUpperCase()}</text>${m.slice(5) === '01' || i === 0 ? `<text x="${x + bw / 2}" y="${H - 1}" text-anchor="middle" style="font-size:9px">${m.slice(2, 4)}</text>` : ''}</g>`; }).join('')}
     </svg><div class="small muted">Número acima da barra: vendas no mês. Toque numa barra para ver o mês.</div></div>
     ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
-    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map(c => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><b class="num">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b></button>`).join('')}</div></div>`
+    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => x.total ? `<span class="small up num">${x.venda && x.coord ? 'venda + coord. ' : x.coord ? 'coord. ' : ''}${brlC(x.total)}</span>` : x.semPct ? '<span class="small down">sem % no produto</span>' : '')(coms[i])}</span></button>`).join('')}</div></div>`
       : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
-    <div class="card kpi"><span class="lbl">Total de ${ano}</span><span class="val num">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
+    <div class="card kpi"><span class="lbl">Total de ${ano}</span><span class="val num">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'} · comissão ${brlC(comAno)}</span></div>
   </div>`);
   animate($('#sheetBody'));
 }
@@ -2026,7 +2041,8 @@ function sheetSimples(tipo, it){
   openSheet(novo ? (isP ? 'Novo produto' : 'Novo corretor') : (isP ? 'Editar produto' : 'Editar corretor'), `<form class="form" data-form="${tipo}" data-id="${it.id || ''}">
     <div class="field"><label for="sN">Nome</label><input class="inp" id="sN" value="${esc(it.nome)}" required autofocus></div>
     ${isP ? `<div class="field"><label for="sInc">Incorporadora</label><input class="inp" id="sInc" value="${esc(it.inc || '')}"></div>
-    <div class="switch"><div><b>Da minha coordenação</b><div class="small muted">Aparece primeiro nas listas</div></div><button type="button" class="sw${it.coord ? ' on' : ''}" id="sCoord" data-act="sw" role="switch" aria-checked="${!!it.coord}"></button></div>` : ''}
+    <div class="field"><label for="sCom">Comissão que a incorporadora paga (% do VGV)</label><input class="inp" id="sCom" inputmode="decimal" placeholder="Ex.: 4 ou 4,5" value="${it.comissao ? String(it.comissao).replace('.', ',') : ''}"><div class="small muted" style="margin-top:4px">Na sua venda você recebe 40% desse percentual.</div></div>
+    <div class="switch"><div><b>Da minha coordenação</b><div class="small muted">Aparece primeiro nas listas · 0,2% do VGV nas vendas</div></div><button type="button" class="sw${it.coord ? ' on' : ''}" id="sCoord" data-act="sw" role="switch" aria-checked="${!!it.coord}"></button></div>` : ''}
     ${isP ? `<div class="field"><label>Cor</label><div class="toggles" id="sCor">${PCORES.map(c => `<button type="button" class="${c === it.cor ? 'on' : ''}" data-act="pickCor" data-v="${c}" style="background:${c};outline:${c === it.cor ? '3px solid var(--fg)' : 'none'};outline-offset:2px" aria-label="Cor"></button>`).join('')}</div></div>` : ''}
     <button class="btn pri wide">Salvar</button>
     ${!novo && it.id !== 'eu' ? `<button type="button" class="btn dan wide" data-act="askDel">Excluir</button>${confirmBox('Excluir? Os clientes ligados continuam salvos.', isP ? 'delProduto' : 'delCorretor', it.id)}` : ''}</form>`);
@@ -2349,7 +2365,7 @@ const FORMS = {
   produto: f => {
     if (!val('sN')) return toast('Digite o nome do produto.', true);
     const id = f.dataset.id, p = id ? find(S.produtos, id) : {id: uid()};
-    p.nome = val('sN'); p.inc = val('sInc'); p.coord = $('#sCoord').classList.contains('on'); const on = document.querySelector('#sCor .on'); p.cor = on ? on.dataset.v : PCORES[0];
+    p.nome = val('sN'); p.inc = val('sInc'); { const t = val('sCom').replace(/[%\s]/g, '').replace(',', '.'), n = parseFloat(t); if (t && !(n > 0 && n <= 30)) return toast('Comissão: digite um percentual entre 0 e 30.', true); if (n > 0) p.comissao = Math.round(n * 100) / 100; else delete p.comissao; } p.coord = $('#sCoord').classList.contains('on'); const on = document.querySelector('#sCor .on'); p.cor = on ? on.dataset.v : PCORES[0];
     if (!id) S.produtos.push(p); save('produtos'); sheetAjustes(); render(false);
   },
   corretor: f => {
