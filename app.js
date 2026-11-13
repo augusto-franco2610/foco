@@ -1176,10 +1176,16 @@ const somaMes = (ym, n) => { const [y, m] = ym.split('-').map(Number), d = new D
 const vendas = () => CLI().filter(c => c.etapa === 'Venda');
 // Comissão do dono do app numa venda: venda própria = 40% do % que a incorporadora paga; produto da coordenação = 0,2% do VGV.
 const PCT_VENDA = 0.4, PCT_COORD = 0.002;
+// "Eu" e qualquer corretor cadastrado com o seu próprio nome (ex.: "Franco", "Augusto Franco") contam como venda sua.
+function souEu(id){
+  if ((id || 'eu') === 'eu') return true;
+  const n = normNome(B(id).nome), meus = new Set([normNome(B('eu').nome), normNome(me && me.displayName), ...String((me && me.displayName) || '').split(/\s+/).filter(w => w.length > 2).map(normNome)]);
+  meus.delete(''); return !!n && (meus.has(n) || [...meus].some(m => m.length > 5 && n.length > 5 && (m.includes(n) || n.includes(m))));
+}
 function comissaoVenda(c){
-  const v = +c.valor || 0, p = P(c.produtoId), minha = !c._recebido && (c.corretorId || 'eu') === 'eu';
+  const v = +c.valor || 0, p = P(c.produtoId), minha = !c._recebido && souEu(c.corretorId);
   const venda = minha && p.comissao ? v * p.comissao / 100 * PCT_VENDA : 0, coord = p.coord ? v * PCT_COORD : 0;
-  return {venda, coord, total: venda + coord, minha, semPct: minha && !p.comissao, semValor: (minha || p.coord) && !v};
+  return {venda, coord, total: venda + coord, minha, pct: p.comissao || 0, semPct: minha && !p.comissao, semValor: (minha || p.coord) && !v};
 }
 function sheetFechamentos(ym){
   ym = ym || ui.fechMes || today().slice(0, 7); ui.fechMes = ym;
@@ -1224,7 +1230,7 @@ function sheetFechamentos(ym){
           ${nPorMes[i] ? `<text x="${x + bw / 2}" y="${base - h - 5}" text-anchor="middle" style="font-size:10px">${nPorMes[i]}</text>` : ''}<text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" style="${sel ? 'fill:var(--fg);font-weight:700' : ''}">${MES[+m.slice(5) - 1].slice(0, 1).toUpperCase()}</text>${m.slice(5) === '01' || i === 0 ? `<text x="${x + bw / 2}" y="${H - 1}" text-anchor="middle" style="font-size:9px">${m.slice(2, 4)}</text>` : ''}</g>`; }).join('')}
     </svg><div class="small muted">Número acima da barra: vendas no mês. Toque numa barra para ver o mês.</div></div>
     ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
-    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => x.total ? `<span class="small up num">${x.venda && x.coord ? 'venda + coord. ' : x.coord ? 'coord. ' : ''}${brlC(x.total)}</span>` : x.semPct ? '<span class="small down">sem % no produto</span>' : '')(coms[i])}</span></button>`).join('')}</div></div>`
+    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => (x.venda ? `<span class="small up num" style="display:block">40% de ${String(x.pct).replace(".", ",")}% · ${brlC(x.venda)}</span>` : '') + (x.coord ? `<span class="small up num" style="display:block">coord. 0,2% · ${brlC(x.coord)}</span>` : '') + (x.semPct ? '<span class="small down" style="display:block">sem % no produto</span>' : '') + (!x.total && !x.semPct && c.valor ? '<span class="small muted" style="display:block">sem comissão para você</span>' : ''))(coms[i])}</span></button>`).join('')}</div></div>`
       : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
     <div class="card"><h2>Total de ${ano}</h2>
       <div class="grid2"><div class="kpi"><span class="lbl">VGV fechado</span><span class="val num" style="font-size:24px;white-space:nowrap">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
