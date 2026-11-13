@@ -1141,8 +1141,9 @@ function vgv(lista){
 }
 // Comissão prevista: a mesma regra das vendas, aplicada aos clientes em andamento que já têm valor.
 function comissaoPrevista(lista){
-  const r = {venda: 0, coord: 0, total: 0, n: 0, semPct: new Set()};
-  lista.filter(c => ATIVAS.includes(c.etapa) && +c.valor).forEach(c => { const x = comissaoVenda(c); r.venda += x.venda; r.coord += x.coord; r.total += x.total; if (x.total) r.n++; if (x.semPct) r.semPct.add(P(c.produtoId).nome); });
+  const r = {venda: 0, coord: 0, total: 0, n: 0, semPct: new Set(), semProd: []};
+  lista.filter(c => ATIVAS.includes(c.etapa) && +c.valor).forEach(c => { const x = comissaoVenda(c); r.venda += x.venda; r.coord += x.coord; r.total += x.total; if (x.total) r.n++;
+    if (x.semPct) { if (S.produtos.some(p => p.id === c.produtoId)) r.semPct.add(P(c.produtoId).nome); else r.semProd.push(c); } });
   r.semPct = [...r.semPct]; return r;
 }
 const brlCent = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
@@ -1218,12 +1219,13 @@ function sheetFechamentos(ym){
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span><span class="s">40% do percentual do empreendimento</span></span><b class="num">${brlC(comV)}</b></div>
       <div class="row"><span class="grow"><span class="t">Coordenação</span><span class="s">0,2% do VGV dos seus empreendimentos</span></span><b class="num">${brlC(comC)}</b></div></div>
       ${semPct.length ? `<p class="small down" style="margin:8px 0 0">Falta o % de comissão em: ${semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}</div>
-    ${(cp => cp.total || cp.semPct.length ? `<div class="card"><div class="sec-row"><h2 style="margin:0">Comissão prevista</h2><b class="num" style="font-size:22px">${brlC(cp.total)}</b></div>
+    ${(cp => cp.total || cp.semPct.length || cp.semProd.length ? `<div class="card"><div class="sec-row"><h2 style="margin:0">Comissão prevista</h2><b class="num" style="font-size:22px">${brlC(cp.total)}</b></div>
       <p class="small muted" style="margin:6px 0 0">Clientes em andamento no funil, com valor preenchido · ${cp.n} ${cp.n === 1 ? 'negócio' : 'negócios'}</p>
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span></span><b class="num">${brlC(cp.venda)}</b></div>
       <div class="row"><span class="grow"><span class="t">Coordenação</span></span><b class="num">${brlC(cp.coord)}</b></div>
       ${(() => { const fim = comissaoPrevista(CLI().filter(c => ['Crédito aprovado','Proposta','Documentação','Contrato emitido'].includes(c.etapa))); return fim.total ? `<div class="row"><span class="grow"><span class="t">Na reta final</span><span class="s">Crédito aprovado, proposta, documentação e contrato</span></span><b class="num up">${brlC(fim.total)}</b></div>` : ''; })()}</div>
-      ${cp.semPct.length ? `<p class="small down" style="margin:8px 0 0">Sem % de comissão: ${cp.semPct.map(esc).join(', ')}.</p>` : ''}</div>` : '')(comissaoPrevista(CLI()))}
+      ${cp.semPct.length ? `<p class="small down" style="margin:8px 0 0">Sem % de comissão: ${cp.semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}
+      ${cp.semProd.length ? `<p class="small down" style="margin:8px 0 0">Fora da conta por estar sem empreendimento: ${cp.semProd.map(c => `<button type="button" class="link small" data-act="abrirCliente" data-id="${c.id}" style="color:inherit;text-decoration:underline">${esc(c.nome)} (${brlCurto(+c.valor)})</button>`).join(', ')}. Escolha o empreendimento no cliente.</p>` : ''}</div>` : '')(comissaoPrevista(CLI()))}
     <div class="card"><h2>Últimos 12 meses</h2><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="VGV fechado por mês">
       ${meses.map((m, i) => { const h = Math.max(porMes[i] ? 3 : 0, base * porMes[i] / maxM), x = gap + i * (bw + gap), sel = m === ym;
         return `<g class="fech-bar" data-act="fechMes" data-v="${m}" style="cursor:pointer"><rect x="${x - gap / 2}" y="0" width="${bw + gap}" height="${H}" fill="transparent"/><rect class="vb${sel ? ' today' : ''}" x="${x}" y="${base - h}" width="${bw}" height="${Math.max(h, .5)}" rx="5" style="--j:${i};transform:scaleY(0);${sel ? '' : 'opacity:.45'}" data-vbar="1" data-k="fm${m}${porMes[i]}"/>
