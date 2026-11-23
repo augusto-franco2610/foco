@@ -1084,6 +1084,7 @@ function viewHoje(){
     ${pend.length ? `<div class="list">${pend.map(taskRow).join('')}</div>` : empty('check', 'Tudo feito por hoje', 'Os retornos de clientes e as rotinas do dia aparecem aqui.')}
   </section>
   ${feitas.length ? `<section class="card rv"><h2>Feitas · ${feitas.length}</h2><div class="list">${feitas.map(taskRow).join('')}</div></section>` : ''}
+  ${cardEquipe()}
   ${cardVGV()}
   ${cardPorCorretor()}
   ${porProd.length ? `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por produto</h2></div><div class="funnel">${porProd.map((x, j) => `<button class="fstage" data-act="goprod" data-v="${x.p.id}" style="--j:${j}"><span class="nm">${esc(x.p.nome)}</span><span class="tr"><i style="background:${x.p.cor};transform:scaleX(0)" data-bar="${x.n / maxP}" data-k="pp${x.p.id}"></i></span><span class="ct num">${x.n}</span></button>`).join('')}</div></section>` : ''}
@@ -1147,6 +1148,48 @@ function comissaoPrevista(lista){
   r.semPct = [...r.semPct]; return r;
 }
 const brlCent = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
+function cardEquipe(){
+  if (!equipe) return '';
+  const mes = today().slice(0, 7), rows = equipe.membros.map(m => { const at = m.clientes.filter(c => ATIVAS.includes(c.etapa)), vm = m.clientes.filter(c => c.etapa === 'Venda' && dataVenda(c).slice(0, 7) === mes);
+    return {m, n: at.length, q: at.filter(c => c.temp === 'Quente').length, prev: at.reduce((a, c) => a + (+c.valor || 0), 0), mes: vm.reduce((a, c) => a + (+c.valor || 0), 0), nv: vm.length}; });
+  const tot = rows.reduce((a, r) => a + r.mes, 0);
+  return `<section class="card rv"><div class="sec-row"><h2>Minha equipe</h2><span class="small muted num">${equipe.membros.length} ${equipe.membros.length === 1 ? 'corretor' : 'corretores'}</span></div>
+    <div class="list">${rows.map(r => `<button type="button" class="row rowbtn" data-act="eqMembro" data-u="${esc(r.m.uid)}"><span class="avatar" style="width:32px;height:32px;font-size:12px">${esc(initials(r.m.nome))}</span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(r.m.nome)}</span><span class="s">${r.m.ok ? `${r.n} ativos${r.q ? ' · ' + r.q + ' quentes' : ''} · previsto ${brlCurto(r.prev)}` : '<span class="down">sem acesso aos dados</span>'}</span></span><span style="text-align:right"><b class="num up" style="display:block">${brlCurto(r.mes)}</b><span class="small muted">${r.nv} no mês</span></span>${ic('chev','s chev')}</button>`).join('')}</div>
+    ${equipe.faltando.length ? `<p class="small muted" style="margin:8px 0 0">Ainda não entraram no Foco: ${equipe.faltando.map(esc).join(', ')}</p>` : ''}
+    <button type="button" class="link small" data-act="fechamentos" style="margin-top:8px">Gerência no mês: ${brlCent(tot * PCT_GER)} · ver fechamentos</button>
+  </section>`;
+}
+function sheetEquipeMembro(id, q){
+  const m = equipe && equipe.membros.find(x => x.uid === id); if (!m) return;
+  ui.eqMembro = id; q = q || ''; const fe = ui.eqEtapa || 'ativos';
+  let lista = m.clientes.filter(c => fe === 'ativos' ? ATIVAS.includes(c.etapa) : c.etapa === fe);
+  if (q) lista = lista.filter(c => normNome(c.nome + ' ' + (c.fone || '') + ' ' + prodEq(m, c)).includes(normNome(q)));
+  lista.sort((a, b) => ETAPAS.indexOf(b.etapa) - ETAPAS.indexOf(a.etapa) || a.nome.localeCompare(b.nome));
+  const at = m.clientes.filter(c => ATIVAS.includes(c.etapa));
+  openSheet(m.nome, `<div class="form">
+    <div class="grid2"><div class="card kpi"><span class="lbl">Ativos</span><span class="val num">${at.length}</span><span class="delta flat">previsto ${brlCurto(at.reduce((a, c) => a + (+c.valor || 0), 0))}</span></div>
+      <div class="card kpi"><span class="lbl">Vendas no ano</span><span class="val num up">${m.clientes.filter(c => c.etapa === 'Venda' && dataVenda(c).slice(0, 4) === today().slice(0, 4)).length}</span><span class="delta flat">${brlCurto(m.clientes.filter(c => c.etapa === 'Venda' && dataVenda(c).slice(0, 4) === today().slice(0, 4)).reduce((a, c) => a + (+c.valor || 0), 0))}</span></div></div>
+    <select class="inp" data-act="eqEtapa"><option value="ativos"${fe === 'ativos' ? ' selected' : ''}>Em andamento (${at.length})</option>${ETAPAS.map(e => `<option value="${e}"${fe === e ? ' selected' : ''}>${e} (${m.clientes.filter(c => c.etapa === e).length})</option>`).join('')}</select>
+    <input class="inp" id="eqBusca" placeholder="Buscar cliente" value="${esc(q)}" autocomplete="off">
+    <div class="list" id="eqLista">${lista.length ? lista.map(c => `<button type="button" class="row rowbtn" data-act="eqCliente" data-u="${esc(m.uid)}" data-id="${esc(c.id)}"><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}${c.temp ? ` <span class="small ${c.temp === 'Quente' ? 'down' : 'muted'}">· ${esc(c.temp)}</span>` : ''}</span><span class="s">${esc(c.etapa || '')} · ${esc(prodEq(m, c))} · ${esc(corEq(m, c))}${c.lembrete ? ' · retorno ' + ddmm(c.lembrete.slice(0, 10)) : ''}</span></span><b class="num small">${c.valor ? brlCurto(+c.valor) : ''}</b>${ic('chev','s chev')}</button>`).join('') : '<span class="small muted">Nenhum cliente aqui.</span>'}</div>
+    <p class="small muted" style="margin:0">Só visualização: quem altera os clientes é o próprio corretor.</p>
+  </div>`);
+  const b = $('#eqBusca'); if (b) b.addEventListener('input', () => { const v = b.value, pos = b.selectionStart; sheetEquipeMembro(id, v); const n = $('#eqBusca'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } });
+  const sel = document.querySelector('[data-act="eqEtapa"]'); if (sel) sel.addEventListener('change', () => { ui.eqEtapa = sel.value; sheetEquipeMembro(id, $('#eqBusca') ? $('#eqBusca').value : ''); });
+}
+function sheetEquipeCliente(id, cid){
+  const m = equipe && equipe.membros.find(x => x.uid === id), c = m && m.clientes.find(x => x.id === cid); if (!c) return;
+  const fone = (c.fone || '').replace(/\D/g, ''), wa = fone ? 'https://wa.me/' + (fone.length <= 11 ? '55' + fone : fone) : '';
+  const linha = (k, v) => v ? `<div class="row"><span class="grow small muted">${k}</span><span class="t" style="text-align:right;overflow-wrap:anywhere">${v}</span></div>` : '';
+  openSheet(c.nome, `<div class="form">
+    <div class="list">${linha('Corretor', esc(corEq(m, c)) + (corEq(m, c) !== primeiroNome(m.nome) ? ` <span class="small muted">(conta de ${esc(m.nome)})</span>` : ''))}${linha('Etapa', esc(c.etapa || ''))}${linha('Temperatura', esc(c.temp || ''))}${linha('Empreendimento', esc(prodEq(m, c)))}${linha('Unidade', esc(c.unidade || ''))}
+      ${linha('Valor', c.valor ? brl(+c.valor) : '')}${linha('Venda em', c.etapa === 'Venda' ? ddmm(dataVenda(c)) : '')}${linha('Retorno', c.lembrete ? ddmm(c.lembrete.slice(0, 10)) + (c.lembrete.length > 10 ? ' ' + esc(c.lembrete.slice(11, 16)) : '') : '')}${linha('Telefone', esc(c.fone || ''))}</div>
+    ${wa ? `<a class="btn sec wide" href="${wa}" target="_blank" rel="noopener" style="text-decoration:none">WhatsApp</a>` : ''}
+    ${c.notas ? `<div class="card" style="box-shadow:none"><b>Notas</b><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(c.notas)}</p></div>` : ''}
+    ${(c.historico || []).length ? `<div class="card" style="box-shadow:none"><b>Histórico do funil</b><div class="list" style="margin-top:6px">${c.historico.slice(-12).reverse().map(h => `<div class="row small"><span class="grow">${esc(h.de || '—')} → ${esc(h.para || '')}</span><span class="muted">${h.em ? ddmm(ymd(new Date(h.em))) : ''}</span></div>`).join('')}</div></div>` : ''}
+    <button type="button" class="btn sec wide" data-act="eqMembro" data-u="${esc(m.uid)}">Voltar para ${esc(primeiroNome(m.nome))}</button>
+  </div>`);
+}
 function cardVGV(){
   if (!S.clientes.length) return '';
   const v = vgv(S.clientes), mesNome = new Date().toLocaleDateString('pt-BR', {month:'long'});
@@ -1183,6 +1226,44 @@ function souEu(id){
   const n = normNome(B(id).nome), meus = new Set([normNome(B('eu').nome), normNome(me && me.displayName), ...String((me && me.displayName) || '').split(/\s+/).filter(w => w.length > 2).map(normNome)]);
   meus.delete(''); return !!n && (meus.has(n) || [...meus].some(m => m.length > 5 && n.length > 5 && (m.includes(n) || n.includes(m))));
 }
+/* ---------- gerente: equipe de corretores (cada um com conta própria no Foco) ---------- */
+// O administrador define em Ajustes quem é gerente de quem (coleção equipes/{email do gerente}).
+// O gerente lê, só para ver, os clientes, produtos e corretores de cada corretor da equipe; ganha 0,5% do VGV vendido por eles.
+const PCT_GER = 0.005;
+let equipe = null;            // null = não é gerente; {membros:[{uid,email,nome,clientes,produtos,corretores,ok}], faltando:[emails]}
+async function carregarEquipe(){
+  if (!me || !me.email) return;
+  try {
+    const d = await fdb.doc('equipes/' + me.email.toLowerCase()).get();
+    const emails = d.exists && Array.isArray(d.data().corretores) ? d.data().corretores.filter(e => typeof e === 'string').map(e => e.toLowerCase()) : [];
+    if (!emails.length) { if (equipe) { equipe = null; render(false); } return; }
+    await loadDirectory();
+    const porEmail = {}; Object.entries(people).forEach(([id, pp]) => { if (pp && pp.email) porEmail[pp.email.toLowerCase()] = id; });
+    const faltando = emails.filter(e => !porEmail[e]);
+    const membros = await Promise.all(emails.filter(e => porEmail[e]).map(async email => {
+      const id = porEmail[email], m = {uid: id, email, nome: (people[id] && people[id].nome) || email.split('@')[0], clientes: [], produtos: [], corretores: [], ok: true};
+      await Promise.all(['clientes', 'produtos', 'corretores'].map(k => fdb.doc(`users/${id}/dados/${k}`).get()
+        .then(s => { const v = s.exists ? s.data().v : null; if (Array.isArray(v)) m[k] = v.filter(x => x && typeof x === 'object'); })
+        .catch(() => { m.ok = false; })));
+      return m;
+    }));
+    equipe = {membros: membros.sort((a, b) => a.nome.localeCompare(b.nome)), faltando};
+    render(false);
+  } catch(e) { /* sem acesso à equipe: segue como corretor normal */ }
+}
+const primeiroNome = n => String(n || '').split(/\s+/)[0];
+const prodEq = (m, c) => (m.produtos.find(p => p.id === c.produtoId) || {}).nome || c.produtoNome || 'Sem produto';
+const corEq = (m, c) => { const id = c.corretorId || 'eu'; if (id === 'eu') return primeiroNome(m.nome); return (m.corretores.find(b => b.id === id) || {}).nome || c.corretorNome || primeiroNome(m.nome); };
+// Todos os clientes da equipe; o mesmo cliente em duas contas (compartilhado) conta uma vez só.
+function clientesEquipe(){
+  if (!equipe) return [];
+  const vistos = new Set(), out = [];
+  equipe.membros.forEach(m => m.clientes.forEach(c => { const k = normNome(c.nome) + '|' + (+c.valor || 0) + '|' + (c.etapa === 'Venda' ? dataVenda(c) : ''); if (vistos.has(k)) return; vistos.add(k); out.push({c, m}); }));
+  return out;
+}
+const vendasEquipe = () => clientesEquipe().filter(x => x.c.etapa === 'Venda');
+const gerPrevista = () => clientesEquipe().filter(x => ATIVAS.includes(x.c.etapa)).reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER;
+function comPrevComGer(){ const cp = comissaoPrevista(CLI()); cp.ger = equipe ? gerPrevista() : 0; cp.total += cp.ger; return cp; }
 function comissaoVenda(c){
   const v = +c.valor || 0, p = P(c.produtoId), minha = !c._recebido && souEu(c.corretorId);
   const venda = minha && p.comissao ? v * p.comissao / 100 * PCT_VENDA : 0, coord = p.coord ? v * PCT_COORD : 0;
@@ -1202,11 +1283,13 @@ function sheetFechamentos(ym){
   const porCor = agrupar(c => c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome), porProd = agrupar(c => P(c.produtoId).nome);
   const barras = (lista) => { const mx = Math.max(1, ...lista.map(([, x]) => x.v || x.n)); return `<div class="funnel">${lista.map(([k, x], j) => `<div class="fstage" style="--j:${j};grid-template-columns:110px 1fr auto"><span class="nm">${esc(k)}</span><span class="tr"><i style="transform:scaleX(0)" data-bar="${(x.v || x.n) / mx}" data-k="fx${ym}${j}${esc(k)}"></i></span><span class="ct num small" style="text-align:right">${x.n} · ${brlCurto(x.v)}</span></div>`).join('')}</div>`; };
   const dif = ant ? (total - ant) / ant : null;
-  const coms = doMes.map(comissaoVenda), comV = coms.reduce((a, x) => a + x.venda, 0), comC = coms.reduce((a, x) => a + x.coord, 0), comT = comV + comC;
+  const vEq = equipe ? vendasEquipe() : [], gMes = vEq.filter(x => dataVenda(x.c).slice(0, 7) === ym).sort((a, b) => dataVenda(b.c).localeCompare(dataVenda(a.c)));
+  const comG = gMes.reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER, comGAno = vEq.filter(x => dataVenda(x.c).slice(0, 4) === ym.slice(0, 4)).reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER;
+  const coms = doMes.map(comissaoVenda), comV = coms.reduce((a, x) => a + x.venda, 0), comC = coms.reduce((a, x) => a + x.coord, 0), comT = comV + comC + comG;
   const semPct = [...new Set(doMes.filter((c, i) => coms[i].semPct).map(c => P(c.produtoId).nome))];
-  const cAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).map(comissaoVenda), comAno = cAno.reduce((a, x) => a + x.total, 0);
+  const cAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).map(comissaoVenda), comAno = cAno.reduce((a, x) => a + x.total, 0) + comGAno;
   const comAnoV = cAno.reduce((a, x) => a + x.venda, 0), comAnoC = cAno.reduce((a, x) => a + x.coord, 0);
-  const prevAno = ano === today().slice(0, 4) ? comissaoPrevista(CLI()) : null;
+  const prevAno = ano === today().slice(0, 4) ? comPrevComGer() : null;
   const brlC = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
   const W = 340, H = 150, base = 116, bw = 20, gap = (W - 12 * bw) / 13;
   openSheet('Fechamentos', `<div class="form fech">
@@ -1217,15 +1300,17 @@ function sheetFechamentos(ym){
       <div class="card kpi"><span class="lbl">Vendas</span><span class="val num">${doMes.length}</span><span class="delta flat">ticket médio ${brlCurto(ticket)}</span></div></div>
     <div class="card"><div class="sec-row"><h2 style="margin:0">Sua comissão</h2><b class="num up" style="font-size:22px">${brlC(comT)}</b></div>
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span><span class="s">40% do percentual do empreendimento</span></span><b class="num">${brlC(comV)}</b></div>
-      <div class="row"><span class="grow"><span class="t">Coordenação</span><span class="s">0,2% do VGV dos seus empreendimentos</span></span><b class="num">${brlC(comC)}</b></div></div>
+      <div class="row"><span class="grow"><span class="t">Coordenação</span><span class="s">0,2% do VGV dos seus empreendimentos</span></span><b class="num">${brlC(comC)}</b></div>
+      ${equipe ? `<div class="row"><span class="grow"><span class="t">Gerência</span><span class="s">0,5% do VGV da sua equipe · ${gMes.length} ${gMes.length === 1 ? 'venda' : 'vendas'}</span></span><b class="num">${brlC(comG)}</b></div>` : ''}</div>
       ${semPct.length ? `<p class="small down" style="margin:8px 0 0">Falta o % de comissão em: ${semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}</div>
     ${(cp => cp.total || cp.semPct.length || cp.semProd.length ? `<div class="card"><div class="sec-row"><h2 style="margin:0">Comissão prevista</h2><b class="num" style="font-size:22px">${brlC(cp.total)}</b></div>
       <p class="small muted" style="margin:6px 0 0">Clientes em andamento no funil, com valor preenchido · ${cp.n} ${cp.n === 1 ? 'negócio' : 'negócios'}</p>
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span></span><b class="num">${brlC(cp.venda)}</b></div>
       <div class="row"><span class="grow"><span class="t">Coordenação</span></span><b class="num">${brlC(cp.coord)}</b></div>
+      ${equipe ? `<div class="row"><span class="grow"><span class="t">Gerência</span><span class="s">0,5% do VGV em andamento da equipe</span></span><b class="num">${brlC(cp.ger)}</b></div>` : ''}
       ${(() => { const fim = comissaoPrevista(CLI().filter(c => ['Crédito aprovado','Proposta','Documentação','Contrato emitido'].includes(c.etapa))); return fim.total ? `<div class="row"><span class="grow"><span class="t">Na reta final</span><span class="s">Crédito aprovado, proposta, documentação e contrato</span></span><b class="num up">${brlC(fim.total)}</b></div>` : ''; })()}</div>
       ${cp.semPct.length ? `<p class="small down" style="margin:8px 0 0">Sem % de comissão: ${cp.semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}
-      ${cp.semProd.length ? `<p class="small down" style="margin:8px 0 0">Fora da conta por estar sem empreendimento: ${cp.semProd.map(c => `<button type="button" class="link small" data-act="abrirCliente" data-id="${c.id}" style="color:inherit;text-decoration:underline">${esc(c.nome)} (${brlCurto(+c.valor)})</button>`).join(', ')}. Escolha o empreendimento no cliente.</p>` : ''}</div>` : '')(comissaoPrevista(CLI()))}
+      ${cp.semProd.length ? `<p class="small down" style="margin:8px 0 0">Fora da conta por estar sem empreendimento: ${cp.semProd.map(c => `<button type="button" class="link small" data-act="abrirCliente" data-id="${c.id}" style="color:inherit;text-decoration:underline">${esc(c.nome)} (${brlCurto(+c.valor)})</button>`).join(', ')}. Escolha o empreendimento no cliente.</p>` : ''}</div>` : '')(comPrevComGer())}
     <div class="card"><h2>Últimos 12 meses</h2><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="VGV fechado por mês">
       ${meses.map((m, i) => { const h = Math.max(porMes[i] ? 3 : 0, base * porMes[i] / maxM), x = gap + i * (bw + gap), sel = m === ym;
         return `<g class="fech-bar" data-act="fechMes" data-v="${m}" style="cursor:pointer"><rect x="${x - gap / 2}" y="0" width="${bw + gap}" height="${H}" fill="transparent"/><rect class="vb${sel ? ' today' : ''}" x="${x}" y="${base - h}" width="${bw}" height="${Math.max(h, .5)}" rx="5" style="--j:${i};transform:scaleY(0);${sel ? '' : 'opacity:.45'}" data-vbar="1" data-k="fm${m}${porMes[i]}"/>
@@ -1234,9 +1319,10 @@ function sheetFechamentos(ym){
     ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
     <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => (x.venda ? `<span class="small up num" style="display:block">40% de ${String(x.pct).replace(".", ",")}% · ${brlC(x.venda)}</span>` : '') + (x.coord ? `<span class="small up num" style="display:block">coord. 0,2% · ${brlC(x.coord)}</span>` : '') + (x.semPct ? '<span class="small down" style="display:block">sem % no produto</span>' : '') + (!x.total && !x.semPct && c.valor ? '<span class="small muted" style="display:block">sem comissão para você</span>' : ''))(coms[i])}</span></button>`).join('')}</div></div>`
       : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
+    ${equipe && gMes.length ? `<div class="card"><h2>Vendas da equipe · ${gMes.length}</h2><div class="list">${gMes.map(({c, m}) => `<button type="button" class="row rowbtn" data-act="eqCliente" data-u="${esc(m.uid)}" data-id="${esc(c.id)}"><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(prodEq(m, c))}${c.unidade ? ' · ' + esc(c.unidade) : ''} · ${esc(corEq(m, c))}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${c.valor ? `<span class="small up num">gerência ${brlC(+c.valor * PCT_GER)}</span>` : ''}</span></button>`).join('')}</div></div>` : ''}
     <div class="card"><h2>Total de ${ano}</h2>
       <div class="grid2"><div class="kpi"><span class="lbl">VGV fechado</span><span class="val num" style="font-size:24px;white-space:nowrap">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
-        <div class="kpi"><span class="lbl">Comissão</span><span class="val num up" style="font-size:24px;white-space:nowrap">${brl(comAno)}</span><span class="delta flat">venda ${brl(comAnoV)} · coord. ${brl(comAnoC)}</span></div></div>
+        <div class="kpi"><span class="lbl">Comissão</span><span class="val num up" style="font-size:24px;white-space:nowrap">${brl(comAno)}</span><span class="delta flat">venda ${brl(comAnoV)} · coord. ${brl(comAnoC)}${equipe ? ' · gerência ' + brl(comGAno) : ''}</span></div></div>
       ${prevAno && prevAno.total ? `<div class="list" style="margin-top:10px"><div class="row"><span class="grow"><span class="t">Comissão prevista</span><span class="s">${prevAno.n} ${prevAno.n === 1 ? 'negócio' : 'negócios'} em andamento</span></span><b class="num">${brlC(prevAno.total)}</b></div>
         <div class="row"><span class="grow"><span class="t">Fechada + prevista</span></span><b class="num up">${brlC(comAno + prevAno.total)}</b></div></div>` : ''}</div>
   </div>`);
@@ -1522,6 +1608,16 @@ async function carregarAcesso(){
     box.innerHTML = emails.length ? emails.map(e => `<div class="row"><span class="grow small" style="overflow-wrap:anywhere">${esc(e)}</span><button type="button" class="mini" data-act="acessoDel" data-v="${esc(e)}">Remover</button></div>`).join('') : '<span class="small muted">Ninguém além de você por enquanto.</span>';
   } catch(e) { box.innerHTML = `<span class="small muted">Não deu para carregar a lista: ${esc(e.message)}</span>`; }
 }
+let equipesCache = null;
+async function carregarEquipes(){
+  const box = $('#eqLista2'); if (!box) return;
+  try {
+    const qs = await fdb.collection('equipes').get(); equipesCache = qs.docs.map(d => ({id: d.id, corretores: (d.data().corretores || []).filter(e => typeof e === 'string')}));
+    const nome = e => { const p = Object.values(people).find(x => x && x.email === e); return p && p.nome ? `${esc(p.nome)} <span class="muted">${esc(e)}</span>` : esc(e); };
+    box.innerHTML = equipesCache.length ? equipesCache.map(d => `<div class="card" style="box-shadow:none;background:var(--surface);padding:12px"><div class="sec-row"><b class="small" style="overflow-wrap:anywhere">${nome(d.id)}</b><span style="display:flex;gap:6px"><button type="button" class="mini" data-act="eqEditar" data-v="${esc(d.id)}">Editar</button><button type="button" class="mini" data-act="eqRemover" data-v="${esc(d.id)}">Remover</button></span></div>
+      <div class="small" style="margin-top:6px;display:grid;gap:2px">${d.corretores.map(e => `<span style="overflow-wrap:anywhere">· ${nome(e)}</span>`).join('')}</div></div>`).join('') : '<span class="small muted">Nenhum gerente ainda.</span>';
+  } catch(e) { box.innerHTML = `<span class="small muted">Não deu para carregar: ${esc(e.message)}</span>`; }
+}
 async function importarAlimentos(file){
   const txt = await file.text(); let d;
   try { d = JSON.parse(txt); } catch(e) { throw new Error('O arquivo não é um arquivo de alimentos do Foco.'); }
@@ -1535,7 +1631,7 @@ async function importarAlimentos(file){
   return {add, upd, fonte: d.fonte};
 }
 function sheetAjustes(){
-  if (souAdmin()) setTimeout(carregarAcesso, 0);
+  if (souAdmin()) setTimeout(() => { carregarAcesso(); loadDirectory().then(carregarEquipes); }, 0);
   setTimeout(() => { blocoPush(); const f = $('#impArq'); if (f) f.addEventListener('change', async () => { const arq = f.files[0]; if (!arq) return;
     try { const r = await importarAlimentos(arq); toast(`${r.add} receitas importadas${r.upd ? `, ${r.upd} atualizadas` : ''}`); sheetAjustes(); } catch(e) { toast(e.message, true); } f.value = ''; }); }, 0);
   const th = (()=>{ try { return localStorage.getItem('foco-theme') || 'auto'; } catch(e) { return 'auto'; } })();
@@ -1554,7 +1650,13 @@ function sheetAjustes(){
     <div class="card" style="box-shadow:none"><div class="sec-row"><h2 style="margin:0">Corretores</h2><button class="mini" data-act="novoCorretor">Adicionar</button></div><div class="list" style="margin-top:8px">${S.corretores.map(c => `<button class="row rowbtn" data-act="editCorretor" data-id="${c.id}"><span class="avatar" style="width:28px;height:28px;font-size:11px">${esc(initials(c.nome))}</span><span class="grow t" style="font-weight:500">${esc(c.nome)}${c.id === 'eu' ? ' <span class="small muted">(você)</span>' : ''}</span><span class="small muted">${S.clientes.filter(x => x.corretorId === c.id).length}</span>${ic('chev','s chev')}</button>`).join('')}</div></div>
     ${souAdmin() ? `<div class="card" style="box-shadow:none;display:grid;gap:10px"><div><b>Quem pode entrar no Foco</b><div class="small muted">Só estes e-mails (e você) conseguem fazer login.</div></div>
       <div class="list" id="acessoLista"><span class="small muted">Carregando…</span></div>
-      <div style="display:flex;gap:8px"><input class="inp" id="acessoEmail" type="email" inputmode="email" autocomplete="off" placeholder="email@gmail.com" style="flex:1;min-width:0"><button type="button" class="mini" data-act="acessoAdd">Liberar</button></div></div>` : ''}
+      <div style="display:flex;gap:8px"><input class="inp" id="acessoEmail" type="email" inputmode="email" autocomplete="off" placeholder="email@gmail.com" style="flex:1;min-width:0"><button type="button" class="mini" data-act="acessoAdd">Liberar</button></div></div>
+    <div class="card" style="box-shadow:none;display:grid;gap:10px"><div><b>Gerentes e equipes</b><div class="small muted">O gerente vê, sem poder alterar, todos os clientes dos corretores da equipe dele e recebe 0,5% do VGV que eles venderem.</div></div>
+      <div id="eqLista2" style="display:grid;gap:8px"><span class="small muted">Carregando…</span></div>
+      <div class="field"><label for="eqGer">E-mail do gerente</label><input class="inp" id="eqGer" type="email" inputmode="email" autocomplete="off" placeholder="gerente@gmail.com"></div>
+      <div class="field"><label for="eqCors">E-mails dos corretores (um por linha)</label><textarea class="inp" id="eqCors" rows="4" placeholder="corretor1@gmail.com&#10;corretor2@gmail.com"></textarea></div>
+      <button type="button" class="btn sec wide" data-act="eqSalvar">Salvar equipe</button>
+      <p class="small muted" style="margin:0">Todos precisam estar liberados em "Quem pode entrar" e ter entrado no Foco pelo menos uma vez.</p></div>` : ''}
     <button class="btn sec wide" data-act="metas">Metas de peso, macros e leitura</button>
     <div class="card" style="box-shadow:none;display:grid;gap:10px"><div class="sec-row"><b>Receitas e alimentos</b><span class="small muted num">${(S.alimentacao.meus || []).filter(m => m.receita).length} receitas · ${(S.alimentacao.meus || []).filter(m => !m.receita).length} cadastrados</span></div>
       <p class="small muted" style="margin:0">Importe um arquivo de receitas do Foco (.json). Elas ficam só na sua conta e aparecem na busca da refeição.</p>
@@ -2145,6 +2247,20 @@ const ACT = {
     closeSheet(); render(false); toast(`Visita de ${c.nome} efetuada`);
   },
   abrirCliente: el => sheetCliente(findCli(el.dataset.id)),
+  eqMembro: el => { ui.eqEtapa = 'ativos'; sheetEquipeMembro(el.dataset.u); },
+  eqCliente: el => sheetEquipeCliente(el.dataset.u, el.dataset.id),
+  eqSalvar: async () => {
+    const g = ($('#eqGer').value || '').trim().toLowerCase(), cs = [...new Set(($('#eqCors').value || '').toLowerCase().split(/[\s,;]+/).filter(Boolean))];
+    const ok = e => /^[^\s@<>"'/]+@[^\s@<>"'/]+\.[a-z]{2,}$/.test(e);
+    if (!ok(g)) return toast('E-mail do gerente inválido.', true);
+    const ruins = cs.filter(e => !ok(e)); if (ruins.length) return toast('E-mail inválido: ' + ruins[0], true);
+    if (!cs.length) return toast('Coloque pelo menos um corretor.', true);
+    try { await fdb.doc('equipes/' + g).set({corretores: cs.filter(e => e !== g).slice(0, 100)}); toast('Equipe salva'); $('#eqGer').value = ''; $('#eqCors').value = ''; carregarEquipes(); if (me.email.toLowerCase() === g) carregarEquipe(); }
+    catch(e) { toast('Não deu para salvar: ' + e.message, true); }
+  },
+  eqEditar: el => { const d = (equipesCache || []).find(x => x.id === el.dataset.v); if (!d) return; $('#eqGer').value = d.id; $('#eqCors').value = d.corretores.join('\n'); $('#eqGer').scrollIntoView({block: 'center', behavior: 'smooth'}); },
+  eqRemover: async el => { const g = el.dataset.v; if (!confirm(`Tirar ${g} de gerente?`)) return;
+    try { await fdb.doc('equipes/' + g).delete(); toast('Gerente removido'); carregarEquipes(); } catch(e) { toast('Não deu para remover: ' + e.message, true); } },
   fcor: el => { ui.clientesFiltroCor = el.dataset.v; render(false); },
   fprod: el => { ui.clientesFiltroProd = el.dataset.v; render(false); },
   fetapa: el => { ui.clientesEtapa = el.dataset.v && ui.clientesEtapa !== el.dataset.v ? el.dataset.v : null; render(false); },
@@ -2404,7 +2520,7 @@ const FORMS = {
 
 Object.assign(ACT, ACT_TREINO);
 // Ações que gravam algo: um segundo toque no mesmo botão é ignorado enquanto a primeira não termina (+ 800 ms).
-const ACOES_UNICAS = new Set(['avancar','contato','visitaFeita','sairAtend','tsSalvar','tsFinalizar','mealSalvarMeu','acessoDel',
+const ACOES_UNICAS = new Set(['avancar','eqSalvar','eqRemover','contato','visitaFeita','sairAtend','tsSalvar','tsFinalizar','mealSalvarMeu','acessoDel',
   'delPeso','delRefeicao','delTreinoFeito','diaTreino','delCliente','delTarefa','delAtend','delRotina','delLivro','delCurso','delProduto','delCorretor']);
 const travados = new WeakSet();
 function comTrava(alvo, executar){
@@ -2473,6 +2589,7 @@ async function onUser(u){
   try { await loadUserData(); } catch(e) { toast('Não deu para carregar seus dados. Verifique a conexão.', true); }
   watchAtendimentos();
   watchCompartilhados();
+  carregarEquipe();
   render(true); placePill();
   sessao = carregarSessao(); if (sessao) { render(false); toast('Você tem um treino em andamento'); }
   registrarSW().then(() => atualizarFilaPush(false));

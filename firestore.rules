@@ -53,6 +53,20 @@ service cloud.firestore {
         && (!('cal' in d) || d.cal is map) && numero(d, 'criado') && numero(d, 'atualizado');
     }
 
+    // ================= gerentes =================
+    // equipes/{e-mail do gerente} = {corretores: [e-mails]}. Só o administrador monta; o gerente lê a própria.
+    function gerenteDe(uid) {
+      return exists(/databases/$(database)/documents/equipes/$(meuEmail()))
+        && exists(/databases/$(database)/documents/users/$(uid))
+        && get(/databases/$(database)/documents/users/$(uid)).data.email in get(/databases/$(database)/documents/equipes/$(meuEmail())).data.corretores;
+    }
+    match /equipes/{gerente} {
+      allow read: if admin() || (liberado() && meuEmail() == gerente);
+      allow write: if admin() && request.resource.data.keys().hasOnly(['corretores'])
+        && request.resource.data.corretores is list && request.resource.data.corretores.size() >= 1 && request.resource.data.corretores.size() <= 100;
+      allow delete: if admin();
+    }
+
     // ================= lista de acesso =================
     match /config/acesso {
       allow read: if admin();
@@ -75,8 +89,10 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == uid;
 
       // Dados pessoais (clientes, peso, treino, alimentação, leitura, cursos): só o dono.
+      // O gerente do corretor (equipes/{e-mail do gerente}) pode só LER clientes, produtos e corretores dele.
       match /dados/{secao} {
         allow read, write: if liberado() && request.auth.uid == uid;
+        allow read: if liberado() && secao in ['clientes', 'produtos', 'corretores'] && gerenteDe(uid);
       }
     }
 
