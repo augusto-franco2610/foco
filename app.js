@@ -1334,17 +1334,21 @@ function sheetFechamentos(ym){
   animate($('#sheetBody'));
 }
 function cardPorGerente(){
-  const at = ativos(); if (!at.some(c => c.gerente)) return '';
-  const g = {}; at.forEach(c => { const nome = (c.gerente || '').trim(), k = normNome(nome) || '~';
-    g[k] = g[k] || {nome: nome || 'Sem gerente', n: 0, q: 0, m: 0, f: 0, v: 0}; const r = g[k]; r.n++; r.v += +c.valor || 0;
+  const at = ativos(), mes = today().slice(0, 7), vm = CLI().filter(c => c.etapa === 'Venda' && dataVenda(c).slice(0, 7) === mes);
+  if (!at.concat(vm).some(c => c.gerente)) return '';
+  const g = {}, linha = c => { const nome = (c.gerente || '').trim(), k = normNome(nome) || '~'; return g[k] = g[k] || {nome: nome || 'Sem gerente', n: 0, q: 0, m: 0, f: 0, v: 0, feito: 0}; };
+  at.forEach(c => { const r = linha(c); r.n++; r.v += +c.valor || 0;
     if (c.temp === 'Quente') r.q++; else if (c.temp === 'Morno') r.m++; else if (c.temp === 'Frio') r.f++; });
+  vm.forEach(c => { linha(c).feito += +c.valor || 0; });
+  const mesNome = new Date().toLocaleDateString('pt-BR', {month:'long'});
   const rows = Object.entries(g).sort((a, b) => (a[0] === '~') - (b[0] === '~') || b[1].n - a[1].n).map(x => x[1]);
   const max = Math.max(1, ...rows.map(r => r.n)), seg = (v, cls) => v ? `<i class="${cls}" style="flex:${v}"></i>` : '';
   return `<section class="card rv"><div class="sec-row"><h2>Clientes ativos por gerente</h2><span class="small muted num">${at.length} no total</span></div>
     <div class="funnel">${rows.map((r, j) => `<div class="fstage cor" style="--j:${j}" aria-label="${esc(r.nome)}: ${r.n} clientes">
-      <span class="nm">${esc(r.nome)}${nomeEhMeu(r.nome) ? ' <span class="small muted">(você)</span>' : ''}${r.v ? `<span class="small muted" style="display:block;font-weight:400">${brlCurto(r.v)}</span>` : ''}</span>
+      <span class="nm">${esc(r.nome)}${nomeEhMeu(r.nome) ? ' <span class="small muted">(você)</span>' : ''}</span>
       <span class="tr"><span class="stk" style="transform:scaleX(0)" data-bar="${r.n / max}" data-k="bg${j}${esc(normNome(r.nome))}">${seg(r.q, 'tq')}${seg(r.m, 'tm')}${seg(r.f, 'tf')}${seg(r.n - r.q - r.m - r.f, 'tn')}</span></span>
-      <span class="ct num">${r.n}</span></div>`).join('')}</div>
+      <span class="ct num">${r.n}</span></div>
+      <div class="small" style="display:flex;column-gap:14px;row-gap:2px;flex-wrap:wrap;margin:-2px 0 10px"><span class="muted">Previsto <b class="num" style="color:var(--fg)">${brlCurto(r.v)}</b></span><span class="muted">Feito no mês <b class="num up">${brlCurto(r.feito)}</b></span></div>`).join('')}</div>
     <div class="legend small muted"><span><i class="tq"></i>Quente</span><span><i class="tm"></i>Morno</span><span><i class="tf"></i>Frio</span></div>
   </section>`;
 }
