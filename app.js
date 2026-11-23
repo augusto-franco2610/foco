@@ -22,7 +22,7 @@ function limparCliente(x){
   const valor = typeof x.valor === 'number' ? x.valor : (typeof x.valor === 'string' && /^\d+(\.\d+)?$/.test(x.valor) ? +x.valor : 0);
   const o = {
     nome: txt(x.nome, 120), fone: txt(x.fone, 40).replace(/[^\d+()\- ]/g, ''),
-    produtoId: txt(x.produtoId, 60), produtoNome: txt(x.produtoNome, 120), corretorNome: txt(x.corretorNome, 80),
+    produtoId: txt(x.produtoId, 60), produtoNome: txt(x.produtoNome, 120), corretorNome: txt(x.corretorNome, 80), gerente: txt(x.gerente, 80),
     etapa: ETAPAS.includes(etapa) ? etapa : 'Novo lead', temp: TEMPS.includes(x.temp) ? x.temp : '',
     lembrete: dataOk(x.lembrete), notas: txt(x.notas, 5000),
     valor: isFinite(valor) && valor >= 0 ? valor : 0,
@@ -143,7 +143,7 @@ const B = id => S.corretores.find(c => c.id === id) || (String(id).startsWith('s
 let recebidos = [], recebidosMap = {}, sharesMeus = {};
 const CLI = () => S.clientes.concat(recebidos);
 const findCli = id => CLI().find(c => c.id === id);
-const CAMPOS_CLI = ['nome','fone','produtoId','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','unidade','criado'];
+const CAMPOS_CLI = ['nome','fone','produtoId','gerente','etapa','temp','lembrete','notas','valor','contatos','historico','vendaEm','unidade','criado'];
 function snapCliente(c){ const o = {}; CAMPOS_CLI.forEach(k => { if (c[k] !== undefined) o[k] = c[k]; }); o.produtoNome = P(c.produtoId).nome; o.corretorNome = c._recebido ? (c.corretorNome || '') : B(c.corretorId).nome; return o; }
 async function pushShare(c){
   const sid = c._recebido ? c._share : c.shareId; if (!sid || !fdb || c._soLeitura) return;
@@ -1142,8 +1142,8 @@ function vgv(lista){
 }
 // Comissão prevista: a mesma regra das vendas, aplicada aos clientes em andamento que já têm valor.
 function comissaoPrevista(lista){
-  const r = {venda: 0, coord: 0, total: 0, n: 0, semPct: new Set(), semProd: []};
-  lista.filter(c => ATIVAS.includes(c.etapa) && +c.valor).forEach(c => { const x = comissaoVenda(c); r.venda += x.venda; r.coord += x.coord; r.total += x.total; if (x.total) r.n++;
+  const r = {venda: 0, coord: 0, ger: 0, total: 0, n: 0, semPct: new Set(), semProd: []};
+  lista.filter(c => ATIVAS.includes(c.etapa) && +c.valor).forEach(c => { const x = comissaoVenda(c); r.venda += x.venda; r.coord += x.coord; r.ger += x.ger; r.total += x.total; if (x.total) r.n++;
     if (x.semPct) { if (S.produtos.some(p => p.id === c.produtoId)) r.semPct.add(P(c.produtoId).nome); else r.semProd.push(c); } });
   r.semPct = [...r.semPct]; return r;
 }
@@ -1182,7 +1182,7 @@ function sheetEquipeCliente(id, cid){
   const fone = (c.fone || '').replace(/\D/g, ''), wa = fone ? 'https://wa.me/' + (fone.length <= 11 ? '55' + fone : fone) : '';
   const linha = (k, v) => v ? `<div class="row"><span class="grow small muted">${k}</span><span class="t" style="text-align:right;overflow-wrap:anywhere">${v}</span></div>` : '';
   openSheet(c.nome, `<div class="form">
-    <div class="list">${linha('Corretor', esc(corEq(m, c)) + (corEq(m, c) !== primeiroNome(m.nome) ? ` <span class="small muted">(conta de ${esc(m.nome)})</span>` : ''))}${linha('Etapa', esc(c.etapa || ''))}${linha('Temperatura', esc(c.temp || ''))}${linha('Empreendimento', esc(prodEq(m, c)))}${linha('Unidade', esc(c.unidade || ''))}
+    <div class="list">${linha('Corretor', esc(corEq(m, c)) + (corEq(m, c) !== primeiroNome(m.nome) ? ` <span class="small muted">(conta de ${esc(m.nome)})</span>` : ''))}${linha('Gerente', esc(c.gerente || ''))}${linha('Etapa', esc(c.etapa || ''))}${linha('Temperatura', esc(c.temp || ''))}${linha('Empreendimento', esc(prodEq(m, c)))}${linha('Unidade', esc(c.unidade || ''))}
       ${linha('Valor', c.valor ? brl(+c.valor) : '')}${linha('Venda em', c.etapa === 'Venda' ? ddmm(dataVenda(c)) : '')}${linha('Retorno', c.lembrete ? ddmm(c.lembrete.slice(0, 10)) + (c.lembrete.length > 10 ? ' ' + esc(c.lembrete.slice(11, 16)) : '') : '')}${linha('Telefone', esc(c.fone || ''))}</div>
     ${wa ? `<a class="btn sec wide" href="${wa}" target="_blank" rel="noopener" style="text-decoration:none">WhatsApp</a>` : ''}
     ${c.notas ? `<div class="card" style="box-shadow:none"><b>Notas</b><p class="small" style="white-space:pre-wrap;margin:6px 0 0">${esc(c.notas)}</p></div>` : ''}
@@ -1221,11 +1221,12 @@ const vendas = () => CLI().filter(c => c.etapa === 'Venda');
 // Comissão do dono do app numa venda: venda própria = 40% do % que a incorporadora paga; produto da coordenação = 0,2% do VGV.
 const PCT_VENDA = 0.4, PCT_COORD = 0.002;
 // "Eu" e qualquer corretor cadastrado com o seu próprio nome (ex.: "Franco", "Augusto Franco") contam como venda sua.
-function souEu(id){
-  if ((id || 'eu') === 'eu') return true;
-  const n = normNome(B(id).nome), meus = new Set([normNome(B('eu').nome), normNome(me && me.displayName), ...String((me && me.displayName) || '').split(/\s+/).filter(w => w.length > 2).map(normNome)]);
-  meus.delete(''); return !!n && (meus.has(n) || [...meus].some(m => m.length > 5 && n.length > 5 && (m.includes(n) || n.includes(m))));
+function nomeEhMeu(nome){
+  const n = normNome(nome); if (!n) return false;
+  const meus = new Set([normNome(B('eu').nome), normNome(me && me.displayName), ...String((me && me.displayName) || '').split(/\s+/).filter(w => w.length > 2).map(normNome)]);
+  meus.delete(''); return meus.has(n) || [...meus].some(m => m.length > 5 && n.length > 5 && (m.includes(n) || n.includes(m)));
 }
+function souEu(id){ return (id || 'eu') === 'eu' || nomeEhMeu(B(id).nome); }
 /* ---------- gerente: equipe de corretores (cada um com conta própria no Foco) ---------- */
 // O administrador define em Ajustes quem é gerente de quem (coleção equipes/{email do gerente}).
 // O gerente lê, só para ver, os clientes, produtos e corretores de cada corretor da equipe; ganha 0,5% do VGV vendido por eles.
@@ -1261,13 +1262,15 @@ function clientesEquipe(){
   equipe.membros.forEach(m => m.clientes.forEach(c => { const k = normNome(c.nome) + '|' + (+c.valor || 0) + '|' + (c.etapa === 'Venda' ? dataVenda(c) : ''); if (vistos.has(k)) return; vistos.add(k); out.push({c, m}); }));
   return out;
 }
-const vendasEquipe = () => clientesEquipe().filter(x => x.c.etapa === 'Venda');
-const gerPrevista = () => clientesEquipe().filter(x => ATIVAS.includes(x.c.etapa)).reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER;
-function comPrevComGer(){ const cp = comissaoPrevista(CLI()); cp.ger = equipe ? gerPrevista() : 0; cp.total += cp.ger; return cp; }
+const doMeuTime = x => !x.c.gerente || nomeEhMeu(x.c.gerente);   // cliente com outro gerente na ficha não entra
+const vendasEquipe = () => clientesEquipe().filter(x => x.c.etapa === 'Venda' && doMeuTime(x));
+const gerPrevista = () => clientesEquipe().filter(x => ATIVAS.includes(x.c.etapa) && doMeuTime(x)).reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER;
+function comPrevComGer(){ const cp = comissaoPrevista(CLI()), eq = equipe ? gerPrevista() : 0; cp.ger += eq; cp.total += eq; return cp; }
+const temGerencia = () => !!equipe || S.clientes.some(c => nomeEhMeu(c.gerente));
 function comissaoVenda(c){
   const v = +c.valor || 0, p = P(c.produtoId), minha = !c._recebido && souEu(c.corretorId);
-  const venda = minha && p.comissao ? v * p.comissao / 100 * PCT_VENDA : 0, coord = p.coord ? v * PCT_COORD : 0;
-  return {venda, coord, total: venda + coord, minha, pct: p.comissao || 0, semPct: minha && !p.comissao, semValor: (minha || p.coord) && !v};
+  const venda = minha && p.comissao ? v * p.comissao / 100 * PCT_VENDA : 0, coord = p.coord ? v * PCT_COORD : 0, ger = nomeEhMeu(c.gerente) ? v * PCT_GER : 0;
+  return {venda, coord, ger, total: venda + coord + ger, minha, pct: p.comissao || 0, semPct: minha && !p.comissao, semValor: (minha || p.coord) && !v};
 }
 function sheetFechamentos(ym){
   ym = ym || ui.fechMes || today().slice(0, 7); ui.fechMes = ym;
@@ -1284,10 +1287,11 @@ function sheetFechamentos(ym){
   const barras = (lista) => { const mx = Math.max(1, ...lista.map(([, x]) => x.v || x.n)); return `<div class="funnel">${lista.map(([k, x], j) => `<div class="fstage" style="--j:${j};grid-template-columns:110px 1fr auto"><span class="nm">${esc(k)}</span><span class="tr"><i style="transform:scaleX(0)" data-bar="${(x.v || x.n) / mx}" data-k="fx${ym}${j}${esc(k)}"></i></span><span class="ct num small" style="text-align:right">${x.n} · ${brlCurto(x.v)}</span></div>`).join('')}</div>`; };
   const dif = ant ? (total - ant) / ant : null;
   const vEq = equipe ? vendasEquipe() : [], gMes = vEq.filter(x => dataVenda(x.c).slice(0, 7) === ym).sort((a, b) => dataVenda(b.c).localeCompare(dataVenda(a.c)));
-  const comG = gMes.reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER, comGAno = vEq.filter(x => dataVenda(x.c).slice(0, 4) === ym.slice(0, 4)).reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER;
-  const coms = doMes.map(comissaoVenda), comV = coms.reduce((a, x) => a + x.venda, 0), comC = coms.reduce((a, x) => a + x.coord, 0), comT = comV + comC + comG;
+  const comGEq = gMes.reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER, comGEqAno = vEq.filter(x => dataVenda(x.c).slice(0, 4) === ym.slice(0, 4)).reduce((a, x) => a + (+x.c.valor || 0), 0) * PCT_GER;
+  const coms = doMes.map(comissaoVenda), comV = coms.reduce((a, x) => a + x.venda, 0), comC = coms.reduce((a, x) => a + x.coord, 0);
+  const nGerMes = gMes.length + coms.filter(x => x.ger).length, comG = comGEq + coms.reduce((a, x) => a + x.ger, 0), comT = comV + comC + comG, temGer = temGerencia();
   const semPct = [...new Set(doMes.filter((c, i) => coms[i].semPct).map(c => P(c.produtoId).nome))];
-  const cAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).map(comissaoVenda), comAno = cAno.reduce((a, x) => a + x.total, 0) + comGAno;
+  const cAno = todas.filter(c => dataVenda(c).slice(0, 4) === ano).map(comissaoVenda), comAno = cAno.reduce((a, x) => a + x.total, 0) + comGEqAno, comGAno = comGEqAno + cAno.reduce((a, x) => a + x.ger, 0);
   const comAnoV = cAno.reduce((a, x) => a + x.venda, 0), comAnoC = cAno.reduce((a, x) => a + x.coord, 0);
   const prevAno = ano === today().slice(0, 4) ? comPrevComGer() : null;
   const brlC = v => v.toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
@@ -1301,13 +1305,13 @@ function sheetFechamentos(ym){
     <div class="card"><div class="sec-row"><h2 style="margin:0">Sua comissão</h2><b class="num up" style="font-size:22px">${brlC(comT)}</b></div>
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span><span class="s">40% do percentual do empreendimento</span></span><b class="num">${brlC(comV)}</b></div>
       <div class="row"><span class="grow"><span class="t">Coordenação</span><span class="s">0,2% do VGV dos seus empreendimentos</span></span><b class="num">${brlC(comC)}</b></div>
-      ${equipe ? `<div class="row"><span class="grow"><span class="t">Gerência</span><span class="s">0,5% do VGV da sua equipe · ${gMes.length} ${gMes.length === 1 ? 'venda' : 'vendas'}</span></span><b class="num">${brlC(comG)}</b></div>` : ''}</div>
+      ${temGer ? `<div class="row"><span class="grow"><span class="t">Gerência</span><span class="s">0,5% do VGV das vendas que você gerencia · ${nGerMes} ${nGerMes === 1 ? 'venda' : 'vendas'}</span></span><b class="num">${brlC(comG)}</b></div>` : ''}</div>
       ${semPct.length ? `<p class="small down" style="margin:8px 0 0">Falta o % de comissão em: ${semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}</div>
     ${(cp => cp.total || cp.semPct.length || cp.semProd.length ? `<div class="card"><div class="sec-row"><h2 style="margin:0">Comissão prevista</h2><b class="num" style="font-size:22px">${brlC(cp.total)}</b></div>
       <p class="small muted" style="margin:6px 0 0">Clientes em andamento no funil, com valor preenchido · ${cp.n} ${cp.n === 1 ? 'negócio' : 'negócios'}</p>
       <div class="list" style="margin-top:8px"><div class="row"><span class="grow"><span class="t">Vendas próprias</span></span><b class="num">${brlC(cp.venda)}</b></div>
       <div class="row"><span class="grow"><span class="t">Coordenação</span></span><b class="num">${brlC(cp.coord)}</b></div>
-      ${equipe ? `<div class="row"><span class="grow"><span class="t">Gerência</span><span class="s">0,5% do VGV em andamento da equipe</span></span><b class="num">${brlC(cp.ger)}</b></div>` : ''}
+      ${temGerencia() ? `<div class="row"><span class="grow"><span class="t">Gerência</span><span class="s">0,5% do VGV em andamento que você gerencia</span></span><b class="num">${brlC(cp.ger)}</b></div>` : ''}
       ${(() => { const fim = comissaoPrevista(CLI().filter(c => ['Crédito aprovado','Proposta','Documentação','Contrato emitido'].includes(c.etapa))); return fim.total ? `<div class="row"><span class="grow"><span class="t">Na reta final</span><span class="s">Crédito aprovado, proposta, documentação e contrato</span></span><b class="num up">${brlC(fim.total)}</b></div>` : ''; })()}</div>
       ${cp.semPct.length ? `<p class="small down" style="margin:8px 0 0">Sem % de comissão: ${cp.semPct.map(esc).join(', ')}. Coloque em Ajustes → Produtos.</p>` : ''}
       ${cp.semProd.length ? `<p class="small down" style="margin:8px 0 0">Fora da conta por estar sem empreendimento: ${cp.semProd.map(c => `<button type="button" class="link small" data-act="abrirCliente" data-id="${c.id}" style="color:inherit;text-decoration:underline">${esc(c.nome)} (${brlCurto(+c.valor)})</button>`).join(', ')}. Escolha o empreendimento no cliente.</p>` : ''}</div>` : '')(comPrevComGer())}
@@ -1317,12 +1321,12 @@ function sheetFechamentos(ym){
           ${nPorMes[i] ? `<text x="${x + bw / 2}" y="${base - h - 5}" text-anchor="middle" style="font-size:10px">${nPorMes[i]}</text>` : ''}<text x="${x + bw / 2}" y="${H - 14}" text-anchor="middle" style="${sel ? 'fill:var(--fg);font-weight:700' : ''}">${MES[+m.slice(5) - 1].slice(0, 1).toUpperCase()}</text>${m.slice(5) === '01' || i === 0 ? `<text x="${x + bw / 2}" y="${H - 1}" text-anchor="middle" style="font-size:9px">${m.slice(2, 4)}</text>` : ''}</g>`; }).join('')}
     </svg><div class="small muted">Número acima da barra: vendas no mês. Toque numa barra para ver o mês.</div></div>
     ${doMes.length ? `<div class="card"><h2>Por corretor</h2>${barras(porCor)}</div><div class="card"><h2>Por produto</h2>${barras(porProd)}</div>
-    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => (x.venda ? `<span class="small up num" style="display:block">40% de ${String(x.pct).replace(".", ",")}% · ${brlC(x.venda)}</span>` : '') + (x.coord ? `<span class="small up num" style="display:block">coord. 0,2% · ${brlC(x.coord)}</span>` : '') + (x.semPct ? '<span class="small down" style="display:block">sem % no produto</span>' : '') + (!x.total && !x.semPct && c.valor ? '<span class="small muted" style="display:block">sem comissão para você</span>' : ''))(coms[i])}</span></button>`).join('')}</div></div>`
+    <div class="card"><h2>Vendas do mês · ${doMes.length}</h2><div class="list">${doMes.map((c, i) => `<button type="button" class="row rowbtn" data-act="abrirCliente" data-id="${c.id}"><span class="dot" style="background:${P(c.produtoId).cor};width:10px;height:10px"></span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(P(c.produtoId).nome)}${c.unidade ? ' · ' + esc(c.unidade) : ' · <span class="down">unidade não informada</span>'} · ${esc(c._recebido ? (c.corretorNome || 'Parceiro') : B(c.corretorId).nome)}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${(x => (x.venda ? `<span class="small up num" style="display:block">40% de ${String(x.pct).replace(".", ",")}% · ${brlC(x.venda)}</span>` : '') + (x.coord ? `<span class="small up num" style="display:block">coord. 0,2% · ${brlC(x.coord)}</span>` : '') + (x.ger ? `<span class="small up num" style="display:block">gerência 0,5% · ${brlC(x.ger)}</span>` : '') + (x.semPct ? '<span class="small down" style="display:block">sem % no produto</span>' : '') + (!x.total && !x.semPct && c.valor ? '<span class="small muted" style="display:block">sem comissão para você</span>' : ''))(coms[i])}</span></button>`).join('')}</div></div>`
       : `<div class="card">${empty('chart', 'Nenhuma venda em ' + nomeMes(ym), 'Quando um cliente vai para a etapa Venda, ele entra no fechamento do mês da data da venda.')}</div>`}
     ${equipe && gMes.length ? `<div class="card"><h2>Vendas da equipe · ${gMes.length}</h2><div class="list">${gMes.map(({c, m}) => `<button type="button" class="row rowbtn" data-act="eqCliente" data-u="${esc(m.uid)}" data-id="${esc(c.id)}"><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(c.nome)}</span><span class="s">${ddmm(dataVenda(c))} · ${esc(prodEq(m, c))}${c.unidade ? ' · ' + esc(c.unidade) : ''} · ${esc(corEq(m, c))}</span></span><span style="text-align:right"><b class="num" style="display:block">${c.valor ? brlCurto(+c.valor) : '<span class="small muted">sem valor</span>'}</b>${c.valor ? `<span class="small up num">gerência ${brlC(+c.valor * PCT_GER)}</span>` : ''}</span></button>`).join('')}</div></div>` : ''}
     <div class="card"><h2>Total de ${ano}</h2>
       <div class="grid2"><div class="kpi"><span class="lbl">VGV fechado</span><span class="val num" style="font-size:24px;white-space:nowrap">${brlCurto(totAno)}</span><span class="delta flat">${nAno} ${nAno === 1 ? 'venda' : 'vendas'}</span></div>
-        <div class="kpi"><span class="lbl">Comissão</span><span class="val num up" style="font-size:24px;white-space:nowrap">${brl(comAno)}</span><span class="delta flat">venda ${brl(comAnoV)} · coord. ${brl(comAnoC)}${equipe ? ' · gerência ' + brl(comGAno) : ''}</span></div></div>
+        <div class="kpi"><span class="lbl">Comissão</span><span class="val num up" style="font-size:24px;white-space:nowrap">${brl(comAno)}</span><span class="delta flat">venda ${brl(comAnoV)} · coord. ${brl(comAnoC)}${temGer ? ' · gerência ' + brl(comGAno) : ''}</span></div></div>
       ${prevAno && prevAno.total ? `<div class="list" style="margin-top:10px"><div class="row"><span class="grow"><span class="t">Comissão prevista</span><span class="s">${prevAno.n} ${prevAno.n === 1 ? 'negócio' : 'negócios'} em andamento</span></span><b class="num">${brlC(prevAno.total)}</b></div>
         <div class="row"><span class="grow"><span class="t">Fechada + prevista</span></span><b class="num up">${brlC(comAno + prevAno.total)}</b></div></div>` : ''}</div>
   </div>`);
@@ -1753,6 +1757,7 @@ function sheetCliente(c){
     <div class="field"><label for="cFone">Telefone / WhatsApp</label><input class="inp" id="cFone" type="tel" inputmode="tel" value="${esc(c.fone)}" placeholder="11 9 9999-9999"></div>
     <div class="f2"><div class="field"><label for="cProd">Produto</label><select class="inp" id="cProd">${prodOptions(c.produtoId)}<option value=""${!c.produtoId ? ' selected' : ''}>Outro / sem produto</option></select></div>
       <div class="field"><label for="cCor">Corretor</label><input class="inp" id="cCor" list="corList" value="${esc(c._recebido ? (c.corretorNome || '') : S.corretores.some(b => b.id === c.corretorId) ? B(c.corretorId).nome : '')}" placeholder="Nome do corretor" autocomplete="off"><datalist id="corList">${S.corretores.map(b => `<option value="${esc(b.nome)}"></option>`).join('')}</datalist></div></div>
+    <div class="field"><label for="cGer">Gerente</label><input class="inp" id="cGer" list="gerList" value="${esc(c.gerente || '')}" placeholder="Nome do gerente (pode ser você)" autocomplete="off"><datalist id="gerList">${[...new Set([primeiroNome(me && me.displayName), ...S.clientes.map(x => x.gerente).filter(Boolean)])].filter(Boolean).map(n => `<option value="${esc(n)}"></option>`).join('')}</datalist></div>
     <div class="f2"><div class="field"><label for="cEtapa">Etapa do funil</label><select class="inp" id="cEtapa">${ETAPAS.map(e => opt(e, e, c.etapa)).join('')}</select></div>
       <div class="field"><label for="cTemp">Temperatura</label><select class="inp" id="cTemp">${TEMPS.map(e => opt(e, e, c.temp)).join('')}</select></div></div>
     <div class="field" id="cVendaBox" ${c.etapa === 'Venda' ? '' : 'hidden'}><label for="cVenda">Data da venda</label><input class="inp" id="cVenda" type="date" value="${esc(c.etapa === 'Venda' ? (c.vendaEm || dataVenda(c) || today()) : today())}" max="${today()}">
@@ -1821,6 +1826,7 @@ async function saveCliente(form){
   if (c._recebido) c.corretorNome = corNome;
   else { cor = corNome ? S.corretores.find(b => normNome(b.nome) === normNome(corNome)) : S.corretores.find(b => b.id === 'eu');
     if (!cor) { cor = {id: uid(), nome: corNome}; S.corretores.push(cor); save('corretores'); } }
+  if (val('cGer')) c.gerente = val('cGer'); else delete c.gerente;
   Object.assign(c, {nome: val('cNome'), fone: val('cFone'), produtoId: val('cProd'), corretorId: cor.id, temp: val('cTemp'), lembrete: val('cLem'), notas: val('cNotas'), valor: parseBRL(val('cValor'))});
   if (etapaAnt) mudarEtapa(c, val('cEtapa')); else c.etapa = val('cEtapa');
   marcarVenda(c); if (c.etapa === 'Venda' && val('cVenda')) c.vendaEm = val('cVenda');
