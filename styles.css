@@ -315,7 +315,7 @@ select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50
 .legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:12px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
-.fstage .stk i.tq{background:var(--err)} .fstage .stk i.tm{background:var(--warn)} .fstage .stk i.tf{background:var(--accent)}
+.fstage .stk i.tq{background:var(--err)} .fstage .stk i.tm{background:var(--warn)} .fstage .stk i.tf{background:var(--accent)} .fstage .stk i.tn{background:var(--muted, #8e8e93);opacity:.35}
 
 .vgv{font-size:26px}
 .fstage.vg{grid-template-columns:96px 1fr 74px;align-items:center}
