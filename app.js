@@ -1617,6 +1617,34 @@ async function carregarEquipes(){
     box.innerHTML = equipesCache.length ? equipesCache.map(d => `<div class="card" style="box-shadow:none;background:var(--surface);padding:12px"><div class="sec-row"><b class="small" style="overflow-wrap:anywhere">${nome(d.id)}</b><span style="display:flex;gap:6px"><button type="button" class="mini" data-act="eqEditar" data-v="${esc(d.id)}">Editar</button><button type="button" class="mini" data-act="eqRemover" data-v="${esc(d.id)}">Remover</button></span></div>
       <div class="small" style="margin-top:6px;display:grid;gap:2px">${d.corretores.map(e => `<span style="overflow-wrap:anywhere">· ${nome(e)}</span>`).join('')}</div></div>`).join('') : '<span class="small muted">Nenhum gerente ainda.</span>';
   } catch(e) { box.innerHTML = `<span class="small muted">Não deu para carregar: ${esc(e.message)}</span>`; }
+  renderEqPicker();
+}
+// Escolha por toque: primeiro o gerente, depois os corretores dele, entre quem já entrou no Foco.
+const eqSel = {ger: '', cors: new Set()};
+function pessoasFoco(){
+  const vistos = new Set();
+  return Object.values(people).filter(p => p && p.email && !vistos.has(p.email) && vistos.add(p.email)).sort((a, b) => (a.nome || a.email).localeCompare(b.nome || b.email));
+}
+function linhaPessoa(p, act, on, extra){
+  const av = p.foto ? `<img src="${esc(p.foto)}" alt="" referrerpolicy="no-referrer">` : esc(initials(p.nome || p.email));
+  return `<button type="button" class="row rowbtn" data-act="${act}" data-v="${esc(p.email)}" aria-pressed="${on}" style="${on ? 'background:color-mix(in srgb, var(--accent) 14%, transparent);border-radius:12px' : ''}">
+    <span class="avatar" style="width:32px;height:32px;font-size:12px">${av}</span><span class="grow" style="min-width:0"><span class="t" style="display:block">${esc(p.nome || p.email.split('@')[0])}</span><span class="s" style="overflow-wrap:anywhere">${esc(p.email)}${extra ? ' · ' + extra : ''}</span></span>
+    <span style="width:22px;height:22px;border-radius:50%;flex:none;display:grid;place-items:center;${on ? 'background:var(--accent);color:#fff' : 'border:2px solid var(--line, #8e8e93)'}">${on ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' : ''}</span></button>`;
+}
+function renderEqPicker(){
+  const box = $('#eqPicker'); if (!box) return;
+  const todos = pessoasFoco(), gerentes = new Set((equipesCache || []).map(d => d.id));
+  const timeDe = e => (equipesCache || []).filter(d => d.corretores.includes(e) && d.id !== eqSel.ger).map(d => { const g = todos.find(p => p.email === d.id); return primeiroNome(g ? g.nome : d.id); });
+  if (!todos.length) { box.innerHTML = '<span class="small muted">Ninguém entrou no Foco ainda.</span>'; return; }
+  if (!eqSel.ger) {
+    box.innerHTML = `<div class="small muted">1. Toque em quem vai ser o gerente</div><div class="list">${todos.map(p => linhaPessoa(p, 'eqPickGer', false, gerentes.has(p.email) ? 'já é gerente' : '')).join('')}</div>`;
+    return;
+  }
+  const g = todos.find(p => p.email === eqSel.ger) || {email: eqSel.ger, nome: eqSel.ger};
+  box.innerHTML = `<div class="sec-row"><div class="small">Gerente: <b>${esc(g.nome || g.email)}</b></div><button type="button" class="link small" data-act="eqPickGer" data-v="">Trocar</button></div>
+    <div class="small muted">2. Toque nos corretores da equipe · ${eqSel.cors.size} ${eqSel.cors.size === 1 ? 'escolhido' : 'escolhidos'}</div>
+    <div class="list">${todos.filter(p => p.email !== eqSel.ger).map(p => { const t = timeDe(p.email); return linhaPessoa(p, 'eqPickCor', eqSel.cors.has(p.email), t.length ? 'equipe de ' + esc(t.join(', ')) : ''); }).join('')}</div>
+    <div style="display:flex;gap:8px"><button type="button" class="btn sec" data-act="eqPickGer" data-v="" style="flex:1">Cancelar</button><button type="button" class="btn pri" data-act="eqSalvar" style="flex:2"${eqSel.cors.size ? '' : ' disabled'}>Salvar equipe</button></div>`;
 }
 async function importarAlimentos(file){
   const txt = await file.text(); let d;
@@ -1653,10 +1681,8 @@ function sheetAjustes(){
       <div style="display:flex;gap:8px"><input class="inp" id="acessoEmail" type="email" inputmode="email" autocomplete="off" placeholder="email@gmail.com" style="flex:1;min-width:0"><button type="button" class="mini" data-act="acessoAdd">Liberar</button></div></div>
     <div class="card" style="box-shadow:none;display:grid;gap:10px"><div><b>Gerentes e equipes</b><div class="small muted">O gerente vê, sem poder alterar, todos os clientes dos corretores da equipe dele e recebe 0,5% do VGV que eles venderem.</div></div>
       <div id="eqLista2" style="display:grid;gap:8px"><span class="small muted">Carregando…</span></div>
-      <div class="field"><label for="eqGer">E-mail do gerente</label><input class="inp" id="eqGer" type="email" inputmode="email" autocomplete="off" placeholder="gerente@gmail.com"></div>
-      <div class="field"><label for="eqCors">E-mails dos corretores (um por linha)</label><textarea class="inp" id="eqCors" rows="4" placeholder="corretor1@gmail.com&#10;corretor2@gmail.com"></textarea></div>
-      <button type="button" class="btn sec wide" data-act="eqSalvar">Salvar equipe</button>
-      <p class="small muted" style="margin:0">Todos precisam estar liberados em "Quem pode entrar" e ter entrado no Foco pelo menos uma vez.</p></div>` : ''}
+      <div id="eqPicker" style="display:grid;gap:8px"><span class="small muted">Carregando pessoas…</span></div>
+      <p class="small muted" style="margin:0">Aparecem aqui todos que já entraram no Foco. Para alguém novo aparecer, libere o e-mail em "Quem pode entrar" e peça para ele entrar uma vez.</p></div>` : ''}
     <button class="btn sec wide" data-act="metas">Metas de peso, macros e leitura</button>
     <div class="card" style="box-shadow:none;display:grid;gap:10px"><div class="sec-row"><b>Receitas e alimentos</b><span class="small muted num">${(S.alimentacao.meus || []).filter(m => m.receita).length} receitas · ${(S.alimentacao.meus || []).filter(m => !m.receita).length} cadastrados</span></div>
       <p class="small muted" style="margin:0">Importe um arquivo de receitas do Foco (.json). Elas ficam só na sua conta e aparecem na busca da refeição.</p>
@@ -2249,16 +2275,16 @@ const ACT = {
   abrirCliente: el => sheetCliente(findCli(el.dataset.id)),
   eqMembro: el => { ui.eqEtapa = 'ativos'; sheetEquipeMembro(el.dataset.u); },
   eqCliente: el => sheetEquipeCliente(el.dataset.u, el.dataset.id),
+  eqPickGer: el => { const g = el.dataset.v || ''; eqSel.ger = g; const d = (equipesCache || []).find(x => x.id === g); eqSel.cors = new Set(d ? d.corretores : []); renderEqPicker(); },
+  eqPickCor: el => { const e = el.dataset.v; eqSel.cors.has(e) ? eqSel.cors.delete(e) : eqSel.cors.add(e); renderEqPicker(); },
   eqSalvar: async () => {
-    const g = ($('#eqGer').value || '').trim().toLowerCase(), cs = [...new Set(($('#eqCors').value || '').toLowerCase().split(/[\s,;]+/).filter(Boolean))];
-    const ok = e => /^[^\s@<>"'/]+@[^\s@<>"'/]+\.[a-z]{2,}$/.test(e);
-    if (!ok(g)) return toast('E-mail do gerente inválido.', true);
-    const ruins = cs.filter(e => !ok(e)); if (ruins.length) return toast('E-mail inválido: ' + ruins[0], true);
-    if (!cs.length) return toast('Coloque pelo menos um corretor.', true);
-    try { await fdb.doc('equipes/' + g).set({corretores: cs.filter(e => e !== g).slice(0, 100)}); toast('Equipe salva'); $('#eqGer').value = ''; $('#eqCors').value = ''; carregarEquipes(); if (me.email.toLowerCase() === g) carregarEquipe(); }
+    const g = eqSel.ger, cs = [...eqSel.cors].filter(e => e !== g);
+    if (!g) return toast('Escolha o gerente.', true);
+    if (!cs.length) return toast('Escolha pelo menos um corretor.', true);
+    try { await fdb.doc('equipes/' + g).set({corretores: cs.slice(0, 100)}); toast('Equipe salva'); eqSel.ger = ''; eqSel.cors = new Set(); await carregarEquipes(); if (me.email.toLowerCase() === g) carregarEquipe(); }
     catch(e) { toast('Não deu para salvar: ' + e.message, true); }
   },
-  eqEditar: el => { const d = (equipesCache || []).find(x => x.id === el.dataset.v); if (!d) return; $('#eqGer').value = d.id; $('#eqCors').value = d.corretores.join('\n'); $('#eqGer').scrollIntoView({block: 'center', behavior: 'smooth'}); },
+  eqEditar: el => { ACT.eqPickGer(el); const b = $('#eqPicker'); if (b) b.scrollIntoView({block: 'start', behavior: 'smooth'}); },
   eqRemover: async el => { const g = el.dataset.v; if (!confirm(`Tirar ${g} de gerente?`)) return;
     try { await fdb.doc('equipes/' + g).delete(); toast('Gerente removido'); carregarEquipes(); } catch(e) { toast('Não deu para remover: ' + e.message, true); } },
   fcor: el => { ui.clientesFiltroCor = el.dataset.v; render(false); },
