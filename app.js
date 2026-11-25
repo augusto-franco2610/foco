@@ -1882,7 +1882,7 @@ async function saveCliente(form){
 }
 async function syncClienteCal(c, want){
   if (want && c.lembrete && ATIVAS.includes(c.etapa)) {
-    const body = {summary: `Retorno: ${c.nome}`, description: `${P(c.produtoId).nome} · ${c.etapa} · corretor: ${B(c.corretorId).nome}${c.fone ? '\nTelefone: ' + c.fone : ''}${c.notas ? '\n\n' + c.notas : ''}`, start: evTime(c.lembrete), end: evTime(endOf(c.lembrete, 15)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: antec()}]}};
+    const body = {summary: `Retorno: ${comCorretor(c.nome, corretorDoCliente(c))}`, description: `${P(c.produtoId).nome} · ${c.etapa} · corretor: ${B(c.corretorId).nome}${c.fone ? '\nTelefone: ' + c.fone : ''}${c.notas ? '\n\n' + c.notas : ''}`, start: evTime(c.lembrete), end: evTime(endOf(c.lembrete, 15)), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: antec()}]}};
     if (c.calEventId) { try { await cal('calendars/primary/events/' + c.calEventId, {method: 'PATCH', body: JSON.stringify(body)}); return; } catch(e) { c.calEventId = null; } }
     const ev = await cal('calendars/primary/events', {method: 'POST', body: JSON.stringify(body)}); c.calEventId = ev.id;
   } else if (c.calEventId) {
@@ -1951,6 +1951,14 @@ async function saveAtend(form){
     if (ui.tab !== 'agenda') { switchTab('agenda'); } else render(false);
   } catch(e) { btn.disabled = false; btn.textContent = novo ? 'Agendar' : 'Salvar alterações'; toast('Não deu para agendar: ' + e.message, true); }
 }
+// Corretor do cliente do atendimento (pelo vínculo ou, se não houver, pelo nome do cliente)
+function corretorDoCliente(c){ const n = !c ? '' : c._recebido ? (c.corretorNome || '') : B(c.corretorId || 'eu').nome || ''; return n === '—' ? '' : n; }
+function corretorDoAtend(data){
+  const nome = typeof data.cliente === 'string' ? data.cliente : '';
+  const c = (data.clienteId && findCli(data.clienteId)) || (nome && CLI().find(x => normNome(x.nome) === normNome(nome)));
+  return corretorDoCliente(c);
+}
+const comCorretor = (cliente, cor) => cliente + (cor ? ` (corretor: ${cor})` : '');
 // grava no Google Agenda (com convites) e no Firestore; usado pela agenda e pelo cadastro do cliente
 async function gravarAtend(data, old, extras){
   const parts = data.participantes;
@@ -1958,7 +1966,8 @@ async function gravarAtend(data, old, extras){
     if (data.convite) {
       await loadPeople(parts);
       const emails = [...new Set(parts.filter(u => u !== me.uid).map(u => (people[u]||{}).email).filter(Boolean).concat(extras))];
-      const body = {summary: data.titulo + (data.cliente ? ' · ' + data.cliente : ''), location: data.local,
+      const cor = data.cliente ? corretorDoAtend(data) : '';
+      const body = {summary: data.titulo + (data.cliente ? ' · ' + comCorretor(data.cliente, cor) : ''), location: data.local,
         description: [data.produto && 'Produto: ' + data.produto, data.notas].filter(Boolean).join('\n\n') + '\n\nAgendado pelo Foco.',
         start: evTime(data.inicio), end: evTime(endOf(data.inicio, data.duracao)), attendees: emails.map(email => ({email})), reminders: {useDefault: false, overrides: [{method: 'popup', minutes: Math.max(antec(), 30)}, {method: 'popup', minutes: 24 * 60}]}};
       let ev;
