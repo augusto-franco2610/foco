@@ -1370,7 +1370,7 @@ function cardPorCorretor(){
 /* ================= CLIENTES ================= */
 function viewClientes(){
   const fc = ui.clientesFiltroCor, fp = ui.clientesFiltroProd, fe = ui.clientesEtapa;
-  let base = CLI().filter(c => (fc === 'todos' || (fc === 'quentes' ? c.temp === 'Quente' && ATIVAS.includes(c.etapa) : fc === 'recebidos' ? c._recebido : fc === 'meusComp' ? !!c.shareId : c.corretorId === fc)) && (fp === 'todos' || c.produtoId === fp));
+  let base = CLI().filter(c => (fc === 'todos' || (fc === 'quentes' ? c.temp === 'Quente' && ATIVAS.includes(c.etapa) : fc === 'recebidos' ? c._recebido : fc === 'meusComp' ? !!c.shareId : fc === 'semGer' ? !c.gerente && c.etapa !== 'Perdido' : c.corretorId === fc)) && (fp === 'todos' || c.produtoId === fp));
   const counts = ETAPAS.map(e => base.filter(c => c.etapa === e).length), maxC = Math.max(1, ...counts);
   let list = fe ? base.filter(c => c.etapa === fe) : base.filter(c => ATIVAS.includes(c.etapa));
   const t = today();
@@ -1379,7 +1379,7 @@ function viewClientes(){
     return la < lb ? -1 : la > lb ? 1 : a.nome.localeCompare(b.nome);
   });
   const conv = base.length ? counts[VI] / base.length : 0;
-  const chips = [['todos','Todos'],['quentes','Quentes'], ...(recebidos.length ? [['recebidos','Compartilhados comigo']] : []), ...(S.clientes.some(c => c.shareId) ? [['meusComp','Que compartilhei']] : []), ...S.corretores.map(c => [c.id, c.nome])];
+  const chips = [['todos','Todos'],['quentes','Quentes'], ...(recebidos.length ? [['recebidos','Compartilhados comigo']] : []), ...(S.clientes.some(c => c.shareId) ? [['meusComp','Que compartilhei']] : []), ...((n => n ? [['semGer', `⚠︎ Sem gerente · ${n}`]] : [])(CLI().filter(c => !c.gerente && ATIVAS.includes(c.etapa)).length)), ...S.corretores.map(c => [c.id, c.nome])];
   const vf = vgv(base);
   return head(`${ativos().length} ativos · VGV ${brlCurto(vf.previsto)}`, 'Clientes', addBtn('novoCliente', 'Novo cliente')) + `
   <button class="card tap rv fech-atalho" data-act="fechamentos">${ic('chart','s')}<span class="grow"><b>Fechamentos por mês</b><span class="small muted" style="display:block">${(n => n ? `${n} ${n === 1 ? 'venda' : 'vendas'} em ${new Date().toLocaleDateString('pt-BR', {month:'long'})} · ${brlCurto(vgv(CLI()).mes)}` : 'Vendas, VGV, corretores e produtos de cada mês')(vgv(CLI()).nMes)}</span></span>${ic('chev','s chev')}</button>
@@ -1397,9 +1397,9 @@ function clienteCard(c){
   const pillCls = c.etapa === 'Venda' ? 'ok' : c.etapa === 'Perdido' ? '' : 'blue';
   return `<button class="card tap ccard rv" data-act="abrirCliente" data-id="${esc(c.id)}" data-flip="c${esc(c.id)}">
     <div class="top"><div class="grow" style="min-width:0;text-align:left"><div class="nm">${esc(c.nome)}</div>
-      <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}</div></div>
+      <div class="meta small muted" style="margin-top:4px"><i class="dot" style="background:${p.cor}"></i>${esc(p.nome)}<span>·</span>${esc(B(c.corretorId).nome)}${c.gerente ? `<span>·</span>ger. ${esc(c.gerente)}` : ''}</div></div>
       <span class="when ${w.cls}">${esc(w.txt)}</span></div>
-    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}${c.etapa === 'Venda' && c.unidade ? ' · ' + esc(c.unidade) : ''}</span><span class="pill"><span class="temp-${esc(c.temp)}">●</span>${esc(c.temp)}</span>${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
+    <div class="meta"><span class="pill ${pillCls}">${esc(c.etapa)}${c.etapa === 'Venda' && c.unidade ? ' · ' + esc(c.unidade) : ''}</span><span class="pill"><span class="temp-${esc(c.temp)}">●</span>${esc(c.temp)}</span>${!c.gerente && c.etapa !== 'Perdido' ? '<span class="pill" style="color:var(--warn);background:color-mix(in srgb, var(--warn) 16%, transparent)">⚠︎ Sem gerente</span>' : ''}${c.valor ? `<span class="pill num">${brlCurto(+c.valor)}</span>` : ''}${c._recebido ? `<span class="pill blue">${ic('users2','s')}de ${esc(((people[c._dono] || {}).nome || 'parceiro').split(' ')[0])}</span>` : c.shareId ? `<span class="pill blue">${ic('users2','s')}compartilhado</span>` : ''}</div>
     ${idx >= 0 && idx <= VI ? `<div class="hbar"><i style="transform:scaleX(0);${c.etapa === 'Venda' ? 'background:var(--ok)' : ''}" data-bar="${(idx + 1) / (VI + 1)}" data-k="cb${c.id}"></i></div>` : ''}
   </button>`;
 }
